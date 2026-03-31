@@ -1,0 +1,12 @@
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+*.xcuserstate
+.DS_Store
+build/
+DerivedData/
+*.xccheckout
+*.moved-aside
+*.pbxuser
+*.perspective
+*.perspectivev3
