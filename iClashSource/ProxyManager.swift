@@ -17,11 +17,9 @@ final class ProxyManager {
 
     private init() {}
 
-    /// 刷新代理列表
+    /// 刷新代理列表（不自动启动内核）
     func refreshProxyList() async {
-        if configManager.subscriptionURL.isEmpty {
-            proxyGroups = []
-            currentSelections = [:]
+        guard mihomoService.isRunning else {
             return
         }
 
@@ -38,10 +36,6 @@ final class ProxyManager {
         isLoading = true
 
         do {
-            if !mihomoService.isRunning {
-                try await mihomoService.start()
-            }
-
             let proxies = try await mihomoService.fetchProxies()
             let configGroups = configManager.parseProxyGroupsOrder()
             var groups: [(name: String, proxies: [String])] = []
