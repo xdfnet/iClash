@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 /// Mihomo 内核管理服务
 final class MihomoService: ObservableObject {
@@ -10,9 +11,9 @@ final class MihomoService: ObservableObject {
     private(set) var apiUrl: URL?
 
     private let configManager = ConfigManager.shared
+    private let logger = Logger(subsystem: "com.iclash.macos", category: "MihomoService")
     private let apiPort: UInt16 = 9090
-    private let httpPort: UInt16 = 7892
-    private let socksPort: UInt16 = 7891
+    private let mixedPort: UInt16 = 7890
     private let statusNotification = Notification.Name("MihomoStatusChanged")
 
     /// 内核版本
@@ -24,6 +25,7 @@ final class MihomoService: ObservableObject {
     }
 
     private let queue = DispatchQueue(label: "com.iclash.mihomo-service", attributes: .concurrent)
+    private var recentOutput = ""
 
     private init() {}
 
@@ -31,10 +33,14 @@ final class MihomoService: ObservableObject {
     func start() async throws {
         guard !isRunning else { return }
 
+        try cleanupStaleProcesses()
+        try disableSystemProxyIfNeeded()
+
         let configUrl = try await configManager.prepareRuntimeConfigFile()
         let mihomoPath = try getMihomoPath()
-        print("[MihomoService] starting mihomo: \(mihomoPath.path)")
-        print("[MihomoService] using config: \(configUrl.path)")
+        logger.info("Starting mihomo at \(mihomoPath.path, privacy: .public)")
+        logger.info("Using runtime config at \(configUrl.path, privacy: .public)")
+        recentOutput = ""
 
         let process = Process()
         process.executableURL = mihomoPath
@@ -47,7 +53,7 @@ final class MihomoService: ObservableObject {
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
         process.standardError = outputPipe
-        outputPipe.fileHandleForReading.readabilityHandler = { handle in
+        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
 
@@ -55,11 +61,12 @@ final class MihomoService: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !output.isEmpty else { return }
 
-            print("[mihomo] \(output)")
+            self?.appendRecentOutput(output)
+            self?.logger.debug("[mihomo] \(output, privacy: .public)")
         }
         process.terminationHandler = { [weak self] process in
             outputPipe.fileHandleForReading.readabilityHandler = nil
-            print("[MihomoService] process terminated with status: \(process.terminationStatus)")
+            self?.logger.error("mihomo terminated with status: \(process.terminationStatus)")
             self?.handleProcessTermination()
         }
 
@@ -79,7 +86,7 @@ final class MihomoService: ObservableObject {
             guard process.isRunning else {
                 self.process = nil
                 self.apiUrl = nil
-                throw MihomoError.processExitedImmediately
+                throw MihomoError.processExitedImmediately(details: recentOutput)
             }
 
             updateRunningState(true)
@@ -93,31 +100,31 @@ final class MihomoService: ObservableObject {
             self.process = nil
             self.apiUrl = nil
             updateRunningState(false)
-            throw MihomoError.failedToStart(error)
+            logger.error("Failed to start mihomo: \(error.localizedDescription, privacy: .public)")
+            throw MihomoError.failedToStart(error, details: recentOutput)
         }
     }
 
     /// 停止 Mihomo
     func stop() {
-        print("[MihomoService] stop() called, isRunning: \(isRunning), process: \(process != nil)")
+        logger.info("Stopping mihomo, isRunning: \(self.isRunning), hasProcess: \(self.process != nil)")
 
         // 清除系统代理（无论 process 是否存在）
         do {
             try setSystemProxy(enabled: false)
-            print("[MihomoService] setSystemProxy(enabled: false) success")
+            logger.info("Disabled system SOCKS proxy")
         } catch {
-            print("[MihomoService] setSystemProxy failed: \(error)")
+            logger.error("Failed to disable system proxy: \(error.localizedDescription, privacy: .public)")
         }
 
         guard let process = process else {
-            print("[MihomoService] process is nil, returning")
             return
         }
         process.terminate()
         self.process = nil
         self.apiUrl = nil
         updateRunningState(false)
-        print("[MihomoService] process terminated")
+        logger.info("mihomo process terminated")
     }
 
     /// 获取 Mihomo 可执行文件路径
@@ -158,21 +165,62 @@ final class MihomoService: ObservableObject {
     }
 
     /// 设置或清除系统代理（使用 SOCKS 代理）
-    private func setSystemProxy(enabled: Bool) throws {
+    func setSystemProxy(enabled: Bool) throws {
+        let services = fetchActiveNetworkServices()
+        for service in services {
+            if enabled {
+                try runNetworkSetup(arguments: ["-setsocksfirewallproxy", service, "127.0.0.1", "\(mixedPort)"])
+                try runNetworkSetup(arguments: ["-setsocksfirewallproxystate", service, "on"])
+            } else {
+                try runNetworkSetup(arguments: ["-setsocksfirewallproxystate", service, "off"])
+            }
+        }
+    }
+
+    /// 检查系统 SOCKS 代理是否启用（通过 networksetup 查询）
+    func isSystemProxyEnabled() -> Bool {
         let services = fetchActiveNetworkServices()
         for service in services {
             let task = Process()
+            let outputPipe = Pipe()
             task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+            task.arguments = ["-getsocksfirewallproxy", service]
+            task.standardOutput = outputPipe
+            task.standardError = Pipe()
+            task.environment = ProcessInfo.processInfo.environment
 
-            if enabled {
-                task.arguments = ["-setsocksfirewallproxy", service, "127.0.0.1", "\(socksPort)"]
-            } else {
-                task.arguments = ["-setsocksfirewallproxystate", service, "off"]
+            do {
+                try task.run()
+                task.waitUntilExit()
+
+                let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(decoding: data, as: UTF8.self)
+
+                // 检查是否指向 127.0.0.1:7890 且处于开启状态
+                // networksetup 输出格式: "Enabled: Yes\nServer: 127.0.0.1\nPort: 7890\n..."
+                let lines = output.lowercased().components(separatedBy: .newlines)
+                var isEnabled = false
+                var server: String?
+                var port: String?
+
+                for line in lines {
+                    if line.hasPrefix("enabled:") {
+                        isEnabled = line.contains("yes")
+                    } else if line.hasPrefix("server:") {
+                        server = line.replacingOccurrences(of: "server:", with: "").trimmingCharacters(in: .whitespaces)
+                    } else if line.hasPrefix("port:") {
+                        port = line.replacingOccurrences(of: "port:", with: "").trimmingCharacters(in: .whitespaces)
+                    }
+                }
+
+                if isEnabled && server == "127.0.0.1" && port == "7890" {
+                    return true
+                }
+            } catch {
+                continue
             }
-
-            try task.run()
-            task.waitUntilExit()
         }
+        return false
     }
 
     /// 获取当前活跃的网络服务列表
@@ -190,13 +238,12 @@ final class MihomoService: ObservableObject {
             task.waitUntilExit()
 
             guard task.terminationStatus == 0 else {
+                logger.error("networksetup -listallnetworkservices failed with status \(task.terminationStatus)")
                 return ["Wi-Fi"] // 回退默认值
             }
 
             let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(decoding: data, as: UTF8.self)
-
-            let knownKeywords = ["Wi-Fi", "Ethernet", "Thunderbolt Bridge", "USB 10/100/1000", "WAN", "LAN"]
 
             return output
                 .split(separator: "\n")
@@ -206,10 +253,94 @@ final class MihomoService: ObservableObject {
                     if line.hasPrefix("An asterisk") || line.hasPrefix("networksetup") {
                         return false
                     }
-                    return knownKeywords.contains { line.contains($0) }
+                    return !line.hasPrefix("*")
                 }
         } catch {
+            logger.error("Failed to enumerate network services: \(error.localizedDescription, privacy: .public)")
             return ["Wi-Fi"] // 出错时回退默认值
+        }
+    }
+
+    private func appendRecentOutput(_ output: String) {
+        let combined = recentOutput.isEmpty ? output : recentOutput + "\n" + output
+        recentOutput = String(combined.suffix(2_000))
+    }
+
+    private func disableSystemProxyIfNeeded() throws {
+        do {
+            try setSystemProxy(enabled: false)
+        } catch {
+            logger.error("Failed to clear stale system proxy before startup: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
+    private func cleanupStaleProcesses() throws {
+        for port in [apiPort, mixedPort] {
+            let task = Process()
+            let outputPipe = Pipe()
+            task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            task.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-Fpc"]
+            task.standardOutput = outputPipe
+            task.standardError = Pipe()
+
+            try task.run()
+            task.waitUntilExit()
+
+            guard task.terminationStatus == 0 else {
+                continue
+            }
+
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(decoding: data, as: UTF8.self)
+            let entries = output.split(separator: "\n")
+
+            var pid: Int32?
+            var command: String?
+
+            for entry in entries {
+                guard let prefix = entry.first else { continue }
+                let value = String(entry.dropFirst())
+                switch prefix {
+                case "p":
+                    pid = Int32(value)
+                case "c":
+                    command = value
+                default:
+                    break
+                }
+
+                if let pid, let command, command.localizedCaseInsensitiveContains("mihomo") {
+                    logger.info("Terminating stale mihomo process \(pid) on port \(port)")
+                    kill(pid, SIGTERM)
+                    _ = waitpid(pid, nil, 0)
+                    break
+                }
+            }
+        }
+    }
+
+    private func runNetworkSetup(arguments: [String]) throws {
+        let task = Process()
+        let outputPipe = Pipe()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+        task.arguments = arguments
+        task.standardOutput = outputPipe
+        task.standardError = outputPipe
+
+        try task.run()
+        task.waitUntilExit()
+
+        guard task.terminationStatus == 0 else {
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if output.localizedCaseInsensitiveContains("Unable to find item in network database") {
+                logger.error("networksetup could not find service for arguments: \(arguments.joined(separator: " "), privacy: .public)")
+                return
+            }
+
+            throw MihomoError.proxyConfigurationFailed(details: output.isEmpty ? nil : output)
         }
     }
 
@@ -315,7 +446,7 @@ extension MihomoService {
                 self.kernelVersion = version
             }
         } catch {
-            print("[MihomoService] 获取内核版本失败: \(error)")
+            logger.error("Failed to fetch kernel version: \(error.localizedDescription, privacy: .public)")
         }
     }
 }
@@ -325,9 +456,9 @@ enum MihomoError: LocalizedError {
     case mihomoNotFound
     case mihomoNotExecutable
     case networkServiceNotFound
-    case processExitedImmediately
-    case proxyConfigurationFailed
-    case failedToStart(Error)
+    case processExitedImmediately(details: String? = nil)
+    case proxyConfigurationFailed(details: String? = nil)
+    case failedToStart(Error, details: String? = nil)
     case apiNotAvailable
     case apiSelectFailed
 
@@ -339,11 +470,20 @@ enum MihomoError: LocalizedError {
             return "Mihomo 内核文件不可执行"
         case .networkServiceNotFound:
             return "未找到可用的网络服务"
-        case .processExitedImmediately:
+        case .processExitedImmediately(let details):
+            if let details, !details.isEmpty {
+                return "Mihomo 启动后立即退出\n\(details)"
+            }
             return "Mihomo 启动后立即退出"
-        case .proxyConfigurationFailed:
+        case .proxyConfigurationFailed(let details):
+            if let details, !details.isEmpty {
+                return "系统代理配置失败\n\(details)"
+            }
             return "系统代理配置失败"
-        case .failedToStart(let error):
+        case .failedToStart(let error, let details):
+            if let details, !details.isEmpty {
+                return "Mihomo 启动失败: \(error.localizedDescription)\n\(details)"
+            }
             return "Mihomo 启动失败: \(error.localizedDescription)"
         case .apiNotAvailable:
             return "API 不可用"

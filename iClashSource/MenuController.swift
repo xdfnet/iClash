@@ -14,6 +14,22 @@ final class MenuController: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
 
+        // 启动/停止代理（根据系统代理状态判断）
+        let isSystemProxyEnabled = MihomoService.shared.isSystemProxyEnabled()
+        let toggleItem = NSMenuItem(
+            title: isSystemProxyEnabled ? "停止代理" : "启动代理",
+            action: #selector(toggleProxy),
+            keyEquivalent: ""
+        )
+        toggleItem.target = self
+        if let img = NSImage(systemSymbolName: isSystemProxyEnabled ? "stop.circle" : "play.circle", accessibilityDescription: "Toggle") {
+            img.isTemplate = true
+            toggleItem.image = img
+        }
+        menu.addItem(toggleItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         // 切换节点
         let switchItem = NSMenuItem(title: "切换节点", action: nil, keyEquivalent: "")
         switchItem.submenu = buildProxySubmenu()
@@ -24,15 +40,6 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.addItem(switchItem)
 
         menu.addItem(NSMenuItem.separator())
-
-        // 设置
-        let settingsItem = NSMenuItem(title: "设置订阅", action: #selector(openSettings), keyEquivalent: ",")
-        settingsItem.target = self
-        if let img = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings") {
-            img.isTemplate = true
-            settingsItem.image = img
-        }
-        menu.addItem(settingsItem)
 
         // 版本更新
         let selectorItem = NSMenuItem(title: "版本更新", action: #selector(showKernelInfo), keyEquivalent: "")
@@ -125,8 +132,8 @@ final class MenuController: NSObject, NSMenuDelegate {
         delegate?.selectProxy(name: name, in: group)
     }
 
-    @objc private func openSettings() {
-        delegate?.openSettings()
+    @objc private func toggleProxy() {
+        delegate?.toggleProxy()
     }
 
     @objc private func quitApp() {
@@ -172,7 +179,7 @@ protocol MenuControllerDelegate: AnyObject {
     func menuWillOpen()
     func menuNeedsUpdate()
     func selectProxy(name: String, in group: String)
-    func openSettings()
+    func toggleProxy()
     func updateKernel()
     func quitApp()
 }

@@ -17,7 +17,6 @@ struct iClashApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusBarController = StatusBarController()
     private var menuController: MenuController?
-    private let settingsWindowController = SettingsWindowController()
     private let mihomoService = MihomoService.shared
     private let configManager = ConfigManager.shared
     private let proxyManager = ProxyManager.shared
@@ -27,16 +26,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? configManager.ensureBaseConfigurationExists()
         setupMenu()
 
-        if configManager.runtimeConfigFileExists {
-            startProxyOnLaunch()
-        }
-
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(mihomoStatusChanged),
             name: NSNotification.Name("MihomoStatusChanged"),
             object: nil
         )
+
+        // 检查配置是否存在，不存在则先下载（不自动启动代理）
+        Task {
+            do {
+                if !configManager.runtimeConfigFileExists {
+                    _ = try await configManager.downloadAndValidateConfig(url: configManager.subscriptionURL)
+                }
+            } catch {
+                showError("初始化配置失败: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func setupMenu() {
@@ -50,25 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusBarController.updateStatusIcon(isRunning: mihomoService.isRunning)
     }
 
-    private func startProxyOnLaunch() {
-        Task {
-            do {
-                try await mihomoService.start()
-                await mihomoService.fetchKernelVersion()
-                await proxyManager.refreshProxyList()
-                statusBarController.updateStatusIcon(isRunning: true)
-                // 刷新菜单以显示代理列表
-                if let menu = menuController?.buildMenu() {
-                    statusBarController.setMenu(menu)
-                }
-            } catch {
-                showError("启动代理失败: \(error.localizedDescription)")
-            }
-        }
-    }
-
     func applicationWillTerminate(_ notification: Notification) {
-        mihomoService.stop()
+        // 不自动关闭代理，由用户手动控制
     }
 
     private func showError(_ message: String) {
@@ -112,9 +101,20 @@ extension AppDelegate: MenuControllerDelegate {
         }
     }
 
-    func openSettings() {
-        settingsWindowController.delegate = self
-        settingsWindowController.showWindow()
+    func toggleProxy() {
+        Task {
+            let isCurrentlyEnabled = mihomoService.isSystemProxyEnabled()
+            if isCurrentlyEnabled {
+                // 停止代理：只清除系统代理设置
+                try? mihomoService.setSystemProxy(enabled: false)
+            } else {
+                // 启动代理：只设置系统代理
+                try? mihomoService.setSystemProxy(enabled: true)
+            }
+            if let menu = menuController?.buildMenu() {
+                statusBarController.setMenu(menu)
+            }
+        }
     }
 
     func updateKernel() {
@@ -131,14 +131,20 @@ extension AppDelegate: MenuControllerDelegate {
                     alert.runModal()
 
                 case .updated(let newVersion):
-                    // 更新成功，提示用户
+                    // 更新成功，停内核 → 启动内核
                     self?.mihomoService.stop()
-                    let alert = NSAlert()
-                    alert.messageText = "内核更新成功"
-                    alert.informativeText = "已更新到 v\(newVersion)，请重启应用"
-                    alert.alertStyle = .informational
-                    alert.addButton(withTitle: "确定")
-                    alert.runModal()
+                    Task {
+                        try? await self?.mihomoService.start()
+                        await MainActor.run {
+                            self?.statusBarController.updateStatusIcon(isRunning: self?.mihomoService.isRunning ?? false)
+                            let alert = NSAlert()
+                            alert.messageText = "内核更新成功"
+                            alert.informativeText = "已更新到 v\(newVersion)，已自动启动"
+                            alert.alertStyle = .informational
+                            alert.addButton(withTitle: "确定")
+                            alert.runModal()
+                        }
+                    }
 
                 case .failed(let error):
                     self?.showError("更新失败: \(error.localizedDescription)")
@@ -150,24 +156,5 @@ extension AppDelegate: MenuControllerDelegate {
     func quitApp() {
         mihomoService.stop()
         NSApplication.shared.terminate(nil)
-    }
-}
-
-// MARK: - SettingsWindowDelegate
-
-extension AppDelegate: SettingsWindowDelegate {
-    func saveSettings(url: String) {
-        Task {
-            do {
-                _ = try await configManager.downloadAndValidateConfig(url: url)
-                configManager.subscriptionURL = url
-                mihomoService.stop()
-                try await mihomoService.start()
-                await proxyManager.refreshProxyList()
-                statusBarController.updateStatusIcon(isRunning: true)
-            } catch {
-                showError("\(error.localizedDescription)")
-            }
-        }
     }
 }
