@@ -23,6 +23,8 @@ final class MihomoService: ObservableObject {
 
         let configUrl = try await configManager.prepareRuntimeConfigFile()
         let mihomoPath = try getMihomoPath()
+        print("[MihomoService] starting mihomo: \(mihomoPath.path)")
+        print("[MihomoService] using config: \(configUrl.path)")
 
         let process = Process()
         process.executableURL = mihomoPath
@@ -35,7 +37,19 @@ final class MihomoService: ObservableObject {
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
         process.standardError = outputPipe
-        process.terminationHandler = { [weak self] _ in
+        outputPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+
+            let output = String(decoding: data, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !output.isEmpty else { return }
+
+            print("[mihomo] \(output)")
+        }
+        process.terminationHandler = { [weak self] process in
+            outputPipe.fileHandleForReading.readabilityHandler = nil
+            print("[MihomoService] process terminated with status: \(process.terminationStatus)")
             self?.handleProcessTermination()
         }
 

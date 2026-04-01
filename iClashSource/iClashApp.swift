@@ -244,7 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func saveSettings(_ sender: NSButton) {
         // sender 的 superview 是 contentView
-        guard let contentView = sender.superview as? NSView else {
+        guard let contentView = sender.superview else {
             logger.error("contentView not found")
             return
         }
@@ -282,7 +282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 // 6. 刷新菜单
                 await self.refreshProxyList()
-                await self.refreshProxySubmenu()
+                self.refreshProxySubmenu()
             } catch {
                 // 下载/启动失败：提示错误，不保存 URL
                 await MainActor.run {
@@ -380,16 +380,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let group = info["group"] else { return }
 
         Task { [weak self] in
+            guard let self else { return }
             do {
-                try await self?.mihomoService.selectProxy(name: name, in: group)
+                try await self.mihomoService.selectProxy(name: name, in: group)
                 // 切换成功后更新本地选中状态
                 await MainActor.run {
-                    self?.currentSelections[group] = name
-                    self?.refreshProxySubmenu()
+                    self.currentSelections[group] = name
+                    self.refreshProxySubmenu()
                 }
             } catch {
                 await MainActor.run {
-                    self?.showError("切换节点失败: \(error.localizedDescription)")
+                    self.showError("切换节点失败: \(error.localizedDescription)")
                 }
             }
         }
