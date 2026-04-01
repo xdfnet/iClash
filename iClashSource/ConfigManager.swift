@@ -8,12 +8,15 @@ final class ConfigManager {
 
     private let logger = Logger(subsystem: "com.iclash.macos", category: "ConfigManager")
     private let directSession: URLSession
+    private let settings = AppSettings.shared
 
     let configDirectory: URL
     let runtimeConfigFile: URL
 
-    /// 写死的订阅地址
-    let subscriptionURL = "https://boost.hobbyx.cn/d/ddb0b489d10d14ba2d8912b8d30bde03"
+    /// 订阅地址（从设置中获取）
+    var subscriptionURL: String {
+        settings.subscriptionURL
+    }
 
     /// 运行时配置文件是否存在
     var runtimeConfigFileExists: Bool {
@@ -193,221 +196,14 @@ final class ConfigManager {
         let proxyNamesList = proxyNames.map { "'\($0)'" }.joined(separator: ", ")
 
         return """
-        mixed-port: 7890
-        allow-lan: true
-        bind-address: '*'
-        mode: rule
-        log-level: info
-        external-controller: '127.0.0.1:9090'
-        unified-delay: true
-        tcp-concurrent: true
-        dns:
-            enable: true
-            ipv6: false
-            default-nameserver: [223.5.5.5, 119.29.29.29]
-            enhanced-mode: fake-ip
-            fake-ip-range: 198.18.0.1/16
-            use-hosts: true
-            nameserver-policy: { +.google.com: 'https://dns.cloudflare.com/dns-query', +.googleapis.com: 'https://dns.cloudflare.com/dns-query', +.googleapis.cn: 'https://dns.cloudflare.com/dns-query', +.googlevideo.com: 'https://dns.cloudflare.com/dns-query', +.gstatic.com: 'https://dns.cloudflare.com/dns-query', +.youtube.com: 'https://dns.cloudflare.com/dns-query', +.youtu.be: 'https://dns.cloudflare.com/dns-query', +.facebook.com: 'https://dns.cloudflare.com/dns-query', +.twitter.com: 'https://dns.cloudflare.com/dns-query', +.x.com: 'https://dns.cloudflare.com/dns-query', +.github.com: 'https://dns.cloudflare.com/dns-query', +.githubusercontent.com: 'https://dns.cloudflare.com/dns-query', +.openai.com: 'https://dns.cloudflare.com/dns-query', +.chatgpt.com: 'https://dns.cloudflare.com/dns-query', +.anthropic.com: 'https://dns.cloudflare.com/dns-query' }
-            nameserver: ['https://doh.pub/dns-query', 'https://dns.alidns.com/dns-query', 'tls://dot.pub:853', 'tls://dns.alidns.com:853']
-            fallback: ['https://dns.cloudflare.com/dns-query', 'https://dns.google/dns-query', 'tls://1.1.1.1:853', 'tls://8.8.8.8:853']
-            fallback-filter: { geoip: true, geoip-code: CN, ipcidr: [0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4], domain: [+.google.com, +.facebook.com, +.youtube.com, +.githubusercontent.com, +.googlevideo.com, +.googleapis.cn] }
-            fake-ip-filter: ['*.lan', '*.local', '*.localhost', '*.test', localhost.ptlogin2.qq.com, '+.stun.*.*', '+.stun.*.*.*', '+.stun.*.*.*.*', lens.l.google.com, '*.srv.nintendo.net', +.stun.playstation.net, 'xbox.*.*.microsoft.com', '*.*.xboxlive.com', +.msftncsi.com, +.msftconnecttest.com]
+        \(DefaultRules.baseConfig)
         proxies:
             \(proxiesSection)
         proxy-groups:
             - { name: BoostNet, type: select, proxies: [自动选择, 故障转移, DIRECT, \(proxyNamesList)] }
             - { name: 自动选择, type: url-test, proxies: [\(proxyNamesList)], url: 'http://www.gstatic.com/generate_204', interval: 300, tolerance: 50 }
             - { name: 故障转移, type: fallback, proxies: [\(proxyNamesList)], url: 'http://www.gstatic.com/generate_204', interval: 300 }
-        rules:
-            - 'DOMAIN,2.boostnetapp.top,DIRECT'
-            - 'DOMAIN-KEYWORD,admarvel,REJECT'
-            - 'DOMAIN-KEYWORD,admaster,REJECT'
-            - 'DOMAIN-KEYWORD,adsage,REJECT'
-            - 'DOMAIN-KEYWORD,adsmogo,REJECT'
-            - 'DOMAIN-KEYWORD,adsrvmedia,REJECT'
-            - 'DOMAIN-KEYWORD,adwords,REJECT'
-            - 'DOMAIN-KEYWORD,adservice,REJECT'
-            - 'DOMAIN-KEYWORD,domob,REJECT'
-            - 'DOMAIN-KEYWORD,duomeng,REJECT'
-            - 'DOMAIN-KEYWORD,dwtrack,REJECT'
-            - 'DOMAIN-KEYWORD,guanggao,REJECT'
-            - 'DOMAIN-KEYWORD,lianmeng,REJECT'
-            - 'DOMAIN-KEYWORD,omgmta,REJECT'
-            - 'DOMAIN-KEYWORD,openx,REJECT'
-            - 'DOMAIN-KEYWORD,partnerad,REJECT'
-            - 'DOMAIN-KEYWORD,supersonicads,REJECT'
-            - 'DOMAIN-KEYWORD,umeng,REJECT'
-            - 'DOMAIN-KEYWORD,zjtoolbar,REJECT'
-            - 'DOMAIN-SUFFIX,appsflyer.com,REJECT'
-            - 'DOMAIN-SUFFIX,doubleclick.net,REJECT'
-            - 'DOMAIN-SUFFIX,mmstat.com,REJECT'
-            - 'DOMAIN-SUFFIX,local,DIRECT'
-            - 'DOMAIN-SUFFIX,localhost,DIRECT'
-            - 'IP-CIDR,10.0.0.0/8,DIRECT,no-resolve'
-            - 'IP-CIDR,17.0.0.0/8,DIRECT,no-resolve'
-            - 'IP-CIDR,100.64.0.0/10,DIRECT,no-resolve'
-            - 'IP-CIDR,127.0.0.0/8,DIRECT,no-resolve'
-            - 'IP-CIDR,172.16.0.0/12,DIRECT,no-resolve'
-            - 'IP-CIDR,192.168.0.0/16,DIRECT,no-resolve'
-            - 'IP-CIDR,198.18.0.0/16,DIRECT,no-resolve'
-            - 'IP-CIDR,224.0.0.0/4,DIRECT,no-resolve'
-            - 'IP-CIDR6,::1/128,DIRECT,no-resolve'
-            - 'IP-CIDR6,fc00::/7,DIRECT,no-resolve'
-            - 'IP-CIDR6,fe80::/10,DIRECT,no-resolve'
-            - 'DOMAIN-SUFFIX,apps.apple.com,BoostNet'
-            - 'DOMAIN-SUFFIX,itunes.apple.com,BoostNet'
-            - 'DOMAIN-SUFFIX,blobstore.apple.com,BoostNet'
-            - 'DOMAIN,safebrowsing.urlsec.qq.com,DIRECT'
-            - 'DOMAIN-SUFFIX,apple.com,DIRECT'
-            - 'DOMAIN-SUFFIX,apple-cloudkit.com,DIRECT'
-            - 'DOMAIN-SUFFIX,icloud.com,DIRECT'
-            - 'DOMAIN-SUFFIX,icloud-content.com,DIRECT'
-            - 'DOMAIN-SUFFIX,mzstatic.com,DIRECT'
-            - 'DOMAIN-SUFFIX,aaplimg.com,DIRECT'
-            - 'DOMAIN-SUFFIX,cdn-apple.com,DIRECT'
-            - 'DOMAIN-SUFFIX,akadns.net,DIRECT'
-            - 'DOMAIN-KEYWORD,baidu,DIRECT'
-            - 'DOMAIN-KEYWORD,alibaba,DIRECT'
-            - 'DOMAIN-KEYWORD,alicdn,DIRECT'
-            - 'DOMAIN-KEYWORD,alipay,DIRECT'
-            - 'DOMAIN-KEYWORD,taobao,DIRECT'
-            - 'DOMAIN-KEYWORD,tencent,DIRECT'
-            - 'DOMAIN-KEYWORD,bilibili,DIRECT'
-            - 'DOMAIN-KEYWORD,weibo,DIRECT'
-            - 'DOMAIN-KEYWORD,douyin,DIRECT'
-            - 'DOMAIN-KEYWORD,bytedance,DIRECT'
-            - 'DOMAIN-KEYWORD,xiaomi,DIRECT'
-            - 'DOMAIN-KEYWORD,huawei,DIRECT'
-            - 'DOMAIN-KEYWORD,netease,DIRECT'
-            - 'DOMAIN-KEYWORD,meituan,DIRECT'
-            - 'DOMAIN-KEYWORD,pinduoduo,DIRECT'
-            - 'DOMAIN-KEYWORD,kuaishou,DIRECT'
-            - 'DOMAIN-KEYWORD,jingdong,DIRECT'
-            - 'DOMAIN-KEYWORD,officecdn,DIRECT'
-            - 'DOMAIN-SUFFIX,qq.com,DIRECT'
-            - 'DOMAIN-SUFFIX,weixin.com,DIRECT'
-            - 'DOMAIN-SUFFIX,wechat.com,DIRECT'
-            - 'DOMAIN-SUFFIX,gtimg.com,DIRECT'
-            - 'DOMAIN-SUFFIX,qcloud.com,DIRECT'
-            - 'DOMAIN-SUFFIX,myqcloud.com,DIRECT'
-            - 'DOMAIN-SUFFIX,qpic.cn,DIRECT'
-            - 'DOMAIN-SUFFIX,tenpay.com,DIRECT'
-            - 'DOMAIN-SUFFIX,tmall.com,DIRECT'
-            - 'DOMAIN-SUFFIX,jd.com,DIRECT'
-            - 'DOMAIN-SUFFIX,360buyimg.com,DIRECT'
-            - 'DOMAIN-SUFFIX,iqiyi.com,DIRECT'
-            - 'DOMAIN-SUFFIX,youku.com,DIRECT'
-            - 'DOMAIN-SUFFIX,ykimg.com,DIRECT'
-            - 'DOMAIN-SUFFIX,tudou.com,DIRECT'
-            - 'DOMAIN-SUFFIX,acfun.tv,DIRECT'
-            - 'DOMAIN-SUFFIX,hdslb.com,DIRECT'
-            - 'DOMAIN-SUFFIX,sohu.com,DIRECT'
-            - 'DOMAIN-SUFFIX,sogou.com,DIRECT'
-            - 'DOMAIN-SUFFIX,zhihu.com,DIRECT'
-            - 'DOMAIN-SUFFIX,zhimg.com,DIRECT'
-            - 'DOMAIN-SUFFIX,douban.com,DIRECT'
-            - 'DOMAIN-SUFFIX,doubanio.com,DIRECT'
-            - 'DOMAIN-SUFFIX,163.com,DIRECT'
-            - 'DOMAIN-SUFFIX,126.com,DIRECT'
-            - 'DOMAIN-SUFFIX,126.net,DIRECT'
-            - 'DOMAIN-SUFFIX,127.net,DIRECT'
-            - 'DOMAIN-SUFFIX,yeah.net,DIRECT'
-            - 'DOMAIN-SUFFIX,sina.com,DIRECT'
-            - 'DOMAIN-SUFFIX,sinaimg.cn,DIRECT'
-            - 'DOMAIN-SUFFIX,ximalaya.com,DIRECT'
-            - 'DOMAIN-SUFFIX,xmcdn.com,DIRECT'
-            - 'DOMAIN-SUFFIX,csdn.net,DIRECT'
-            - 'DOMAIN-SUFFIX,gitee.com,DIRECT'
-            - 'DOMAIN-SUFFIX,jianshu.com,DIRECT'
-            - 'DOMAIN-SUFFIX,cnblogs.com,DIRECT'
-            - 'DOMAIN-SUFFIX,oschina.net,DIRECT'
-            - 'DOMAIN-SUFFIX,ele.me,DIRECT'
-            - 'DOMAIN-SUFFIX,ctrip.com,DIRECT'
-            - 'DOMAIN-SUFFIX,suning.com,DIRECT'
-            - 'DOMAIN-SUFFIX,dianping.com,DIRECT'
-            - 'DOMAIN-SUFFIX,amap.com,DIRECT'
-            - 'DOMAIN-SUFFIX,autonavi.com,DIRECT'
-            - 'DOMAIN-SUFFIX,mi.com,DIRECT'
-            - 'DOMAIN-SUFFIX,miui.com,DIRECT'
-            - 'DOMAIN-SUFFIX,ifeng.com,DIRECT'
-            - 'DOMAIN-SUFFIX,youdao.com,DIRECT'
-            - 'DOMAIN-SUFFIX,iciba.com,DIRECT'
-            - 'DOMAIN-SUFFIX,xunlei.com,DIRECT'
-            - 'DOMAIN-SUFFIX,smzdm.com,DIRECT'
-            - 'DOMAIN-SUFFIX,sspai.com,DIRECT'
-            - 'DOMAIN-SUFFIX,36kr.com,DIRECT'
-            - 'DOMAIN-SUFFIX,speedtest.net,DIRECT'
-            - 'DOMAIN-SUFFIX,microsoft.com,DIRECT'
-            - 'DOMAIN-SUFFIX,microsoftonline.com,DIRECT'
-            - 'DOMAIN-SUFFIX,office.com,DIRECT'
-            - 'DOMAIN-SUFFIX,office365.com,DIRECT'
-            - 'DOMAIN-SUFFIX,windows.com,DIRECT'
-            - 'DOMAIN-SUFFIX,windowsupdate.com,DIRECT'
-            - 'DOMAIN-SUFFIX,live.com,DIRECT'
-            - 'DOMAIN-SUFFIX,msn.com,DIRECT'
-            - 'DOMAIN-SUFFIX,cn,DIRECT'
-            - 'DOMAIN-KEYWORD,-cn,DIRECT'
-            - 'DOMAIN-KEYWORD,google,BoostNet'
-            - 'DOMAIN-KEYWORD,gmail,BoostNet'
-            - 'DOMAIN-KEYWORD,youtube,BoostNet'
-            - 'DOMAIN-KEYWORD,facebook,BoostNet'
-            - 'DOMAIN-KEYWORD,twitter,BoostNet'
-            - 'DOMAIN-KEYWORD,instagram,BoostNet'
-            - 'DOMAIN-KEYWORD,whatsapp,BoostNet'
-            - 'DOMAIN-KEYWORD,telegram,BoostNet'
-            - 'DOMAIN-KEYWORD,github,BoostNet'
-            - 'DOMAIN-KEYWORD,blogspot,BoostNet'
-            - 'DOMAIN-KEYWORD,dropbox,BoostNet'
-            - 'DOMAIN-KEYWORD,wikipedia,BoostNet'
-            - 'DOMAIN-KEYWORD,pinterest,BoostNet'
-            - 'DOMAIN-KEYWORD,discord,BoostNet'
-            - 'DOMAIN-KEYWORD,openai,BoostNet'
-            - 'DOMAIN-KEYWORD,anthropic,BoostNet'
-            - 'DOMAIN-KEYWORD,netflix,BoostNet'
-            - 'DOMAIN-KEYWORD,spotify,BoostNet'
-            - 'DOMAIN-KEYWORD,amazon,BoostNet'
-            - 'DOMAIN-SUFFIX,t.co,BoostNet'
-            - 'DOMAIN-SUFFIX,x.com,BoostNet'
-            - 'DOMAIN-SUFFIX,twimg.com,BoostNet'
-            - 'DOMAIN-SUFFIX,fb.me,BoostNet'
-            - 'DOMAIN-SUFFIX,fbcdn.net,BoostNet'
-            - 'DOMAIN-SUFFIX,youtu.be,BoostNet'
-            - 'DOMAIN-SUFFIX,ytimg.com,BoostNet'
-            - 'DOMAIN-SUFFIX,gstatic.com,BoostNet'
-            - 'DOMAIN-SUFFIX,ggpht.com,BoostNet'
-            - 'DOMAIN-SUFFIX,googlevideo.com,BoostNet'
-            - 'DOMAIN-SUFFIX,v2ex.com,BoostNet'
-            - 'DOMAIN-SUFFIX,medium.com,BoostNet'
-            - 'DOMAIN-SUFFIX,reddit.com,BoostNet'
-            - 'DOMAIN-SUFFIX,redd.it,BoostNet'
-            - 'DOMAIN-SUFFIX,imgur.com,BoostNet'
-            - 'DOMAIN-SUFFIX,pixiv.net,BoostNet'
-            - 'DOMAIN-SUFFIX,nytimes.com,BoostNet'
-            - 'DOMAIN-SUFFIX,nyt.com,BoostNet'
-            - 'DOMAIN-SUFFIX,bbc.com,BoostNet'
-            - 'DOMAIN-SUFFIX,bbc.co.uk,BoostNet'
-            - 'DOMAIN-SUFFIX,steamcommunity.com,BoostNet'
-            - 'DOMAIN-SUFFIX,twitch.tv,BoostNet'
-            - 'DOMAIN-SUFFIX,vimeo.com,BoostNet'
-            - 'DOMAIN-SUFFIX,tumblr.com,BoostNet'
-            - 'DOMAIN-SUFFIX,linkedin.com,BoostNet'
-            - 'DOMAIN-SUFFIX,licdn.com,BoostNet'
-            - 'DOMAIN-SUFFIX,mega.nz,BoostNet'
-            - 'DOMAIN-SUFFIX,archive.org,BoostNet'
-            - 'DOMAIN-SUFFIX,wikimedia.org,BoostNet'
-            - 'DOMAIN-SUFFIX,soundcloud.com,BoostNet'
-            - 'IP-CIDR,91.108.4.0/22,BoostNet,no-resolve'
-            - 'IP-CIDR,91.108.8.0/21,BoostNet,no-resolve'
-            - 'IP-CIDR,91.108.12.0/22,BoostNet,no-resolve'
-            - 'IP-CIDR,91.108.16.0/22,BoostNet,no-resolve'
-            - 'IP-CIDR,91.108.56.0/22,BoostNet,no-resolve'
-            - 'IP-CIDR,149.154.160.0/20,BoostNet,no-resolve'
-            - 'IP-CIDR6,2001:67c:4e8::/48,BoostNet,no-resolve'
-            - 'IP-CIDR6,2001:b28:f23d::/48,BoostNet,no-resolve'
-            - 'IP-CIDR6,2001:b28:f23f::/48,BoostNet,no-resolve'
-            - 'GEOIP,CN,DIRECT'
-            - 'MATCH,BoostNet'
+        \(DefaultRules.rulesSection)
         """
     }
 
