@@ -33,14 +33,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        // 检查配置是否存在，不存在则先下载（不自动启动代理）
+        // 检查配置是否存在，不存在则先下载，然后启动内核（不设置系统代理）
         Task {
             do {
                 if !configManager.runtimeConfigFileExists {
                     _ = try await configManager.downloadAndValidateConfig(url: configManager.subscriptionURL)
                 }
+                try await mihomoService.start(setProxy: false)
+                statusBarController.updateStatusIcon(isRunning: mihomoService.isRunning)
             } catch {
-                showError("初始化配置失败: \(error.localizedDescription)")
+                statusBarController.updateStatusIcon(isRunning: false)
+            }
+            // 无论内核是否启动成功，都尝试加载代理列表并更新菜单
+            await proxyManager.refreshProxyList()
+            if let menu = menuController?.buildMenu() {
+                statusBarController.setMenu(menu)
             }
         }
     }
@@ -74,15 +81,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: MenuControllerDelegate {
     func menuWillOpen() {
-        Task {
-            await proxyManager.refreshProxyList()
-            if let menu = menuController?.buildMenu() {
-                statusBarController.setMenu(menu)
-            }
-        }
-    }
-
-    func menuNeedsUpdate() {
         if let menu = menuController?.buildMenu() {
             statusBarController.setMenu(menu)
         }

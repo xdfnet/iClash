@@ -75,9 +75,4 @@ final class ProxyManager {
     var isLoadingProxies: Bool {
         isLoading
     }
-
-    /// 使缓存失效
-    func invalidateCache() {
-        lastRefreshTime = nil
-    }
 }

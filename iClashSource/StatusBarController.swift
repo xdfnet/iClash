@@ -6,8 +6,6 @@ final class StatusBarController: NSObject {
     private var statusBarItem: NSStatusItem?
     private var statusMenu: NSMenu?
 
-    weak var delegate: StatusBarControllerDelegate?
-
     override init() {
         super.init()
         setupStatusBar()
@@ -18,14 +16,8 @@ final class StatusBarController: NSObject {
 
         if let button = statusBarItem?.button {
             updateStatusIcon(isRunning: false)
-            button.action = #selector(statusBarButtonClicked)
-            button.target = self
             button.imagePosition = .imageOnly
         }
-    }
-
-    @objc private func statusBarButtonClicked() {
-        delegate?.statusBarButtonClicked()
     }
 
     func updateStatusIcon(isRunning: Bool) {
@@ -48,8 +40,4 @@ final class StatusBarController: NSObject {
     func getMenu() -> NSMenu? {
         statusMenu
     }
-}
-
-protocol StatusBarControllerDelegate: AnyObject {
-    func statusBarButtonClicked()
 }
