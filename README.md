@@ -57,10 +57,51 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build
 
 ## 工作原理
 
-### 启动流程
+### 启动序列
 
 ```
-应用启动 → 检查配置是否存在 → 不存在则下载订阅 → 启动内核 → 加载代理列表
+1. downloadAndValidateConfig()     下载订阅配置（仅首次）
+2. mihomoService.start()          启动内核
+3. updateStatusIcon()             更新状态栏图标
+4. fetchKernelVersion()           获取内核版本（并行）
+5. refreshProxyList()             刷新代理列表（并行）
+6. buildMenu() / setMenu()       构建并设置菜单
+```
+
+### 切换节点序列
+
+```
+1. 用户点击节点
+2. proxyManager.selectProxy()     调用内核 API
+3. buildMenu() / setMenu()       刷新菜单显示
+```
+
+### 切换代理序列
+
+```
+1. 用户点击"启动代理/停止代理"
+2. setSystemProxy(enabled: true/false)  设置/清除系统代理
+3. buildMenu() / setMenu()       刷新菜单显示
+```
+
+### 版本更新序列
+
+```
+1. mihomoService.stop()           停止旧内核
+2. KernelUpdater.checkForUpdate()  检查版本
+3. KernelUpdater.getDownloadURL() 获取下载链接
+4. KernelUpdater.downloadKernel() 下载到临时目录
+5. KernelUpdater.installKernel()   安装到 bundle
+6. mihomoService.start()         启动新内核
+7. 显示结果
+```
+
+### 退出序列
+
+```
+1. mihomoService.stop()           停止内核
+2. setSystemProxy(enabled: false) 关闭系统代理
+3. NSApplication.terminate()       退出应用
 ```
 
 ### 内核与代理控制
@@ -69,7 +110,7 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build
 - **系统代理**：将系统流量转发到内核的 SOCKS 端口（7890）
 
 两者相互独立：
-- 停止代理只清除系统代理设置，内核继续运行
+- 切换代理只设置/清除系统代理，不影响内核
 - 退出应用会停止内核并清除系统代理
 
 ### 订阅配置

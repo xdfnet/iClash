@@ -139,7 +139,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     @objc private func showKernelInfo() {
         Task {
             let currentVersion = MihomoService.shared.kernelVersion
-            let latestVersion = await KernelUpdater.shared.fetchLatestVersion() ?? "获取失败"
+            let latestVersion = (try? await KernelUpdater.shared.checkForUpdate()) ?? "获取失败"
 
             let alert = NSAlert()
             alert.messageText = "版本更新"

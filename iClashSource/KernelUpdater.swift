@@ -26,118 +26,50 @@ final class KernelUpdater {
 
     private init() {}
 
-    /// 检查更新
-    func checkForUpdate() async -> Bool {
-        guard let url = URL(string: githubAPI) else { return false }
-
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 30
-
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tagName = json["tag_name"] as? String else {
-                return false
-            }
-
-            // 去除 v 前缀
-            latestVersion = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
-            return latestVersion != mihomoService.kernelVersion
-        } catch {
-            logger.error("Failed to check for update: \(error.localizedDescription, privacy: .public)")
-            return false
-        }
-    }
-
-    /// 获取最新版本号 (正式版)
-    func fetchLatestVersion() async -> String? {
-        guard let url = URL(string: githubAPI) else { return nil }
-
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 30
-
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tagName = json["tag_name"] as? String else {
-                return nil
-            }
-
-            return tagName
-        } catch {
-            logger.error("Failed to fetch latest version: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
-    }
-
-    /// 更新内核
-    func updateKernel() async -> KernelUpdateResult {
-        // 先获取最新版本信息 (正式版)
+    /// 检查更新（获取最新版本号）
+    func checkForUpdate() async throws -> String {
         guard let url = URL(string: githubAPI) else {
-            return .failed(KernelUpdaterError.invalidURL)
+            throw KernelUpdaterError.invalidURL
         }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
 
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tagName = json["tag_name"] as? String,
-                  let assets = json["assets"] as? [[String: Any]] else {
-                return .failed(KernelUpdaterError.invalidResponse)
-            }
-
-            let version = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
-            let versionWithV = tagName
-
-            // 查找 darwin-arm64 版本的下载链接
-            guard let downloadURLString = findAssetURL(in: assets, version: version),
-                  let finalDownloadURL = URL(string: downloadURLString) else {
-                return .failed(KernelUpdaterError.downloadURLNotFound)
-            }
-
-            // 下载并解压
-            try await downloadAndInstallKernel(from: finalDownloadURL)
-
-            // 更新内存中的版本号
-            mihomoService.updateKernelVersion(versionWithV)
-
-            return .updated(newVersion: versionWithV)
-        } catch {
-            return .failed(error)
+        let (data, _) = try await URLSession.shared.data(for: request)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tagName = json["tag_name"] as? String else {
+            throw KernelUpdaterError.invalidResponse
         }
+
+        return tagName.hasPrefix("v") ? tagName : "v\(tagName)"
     }
 
-    /// 在 GitHub assets 中查找匹配的下载链接
-    private func findAssetURL(in assets: [[String: Any]], version: String) -> String? {
-        // 优先查找精确版本且不带 go 的 darwin-arm64 版本
-        for asset in assets {
-            guard let name = asset["name"] as? String,
-                  name.hasPrefix("mihomo-darwin-arm64-"),
-                  name.hasSuffix(".gz"),
-                  name.hasPrefix("mihomo-darwin-arm64-v\(version).gz"),
-                  !name.contains("go") else {
-                continue
-            }
-            return asset["browser_download_url"] as? String
+    /// 获取下载链接
+    func getDownloadURL(version: String) async throws -> URL {
+        guard let url = URL(string: githubAPI) else {
+            throw KernelUpdaterError.invalidURL
         }
 
-        // 如果没找到，尝试查找任意匹配的 darwin-arm64 版本
-        for asset in assets {
-            guard let name = asset["name"] as? String,
-                  name.hasPrefix("mihomo-darwin-arm64-"),
-                  name.contains("-\(version).gz") else {
-                continue
-            }
-            return asset["browser_download_url"] as? String
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+
+        let (data, _) = try await URLSession.shared.data(for: request)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let assets = json["assets"] as? [[String: Any]] else {
+            throw KernelUpdaterError.invalidResponse
         }
 
-        return nil
+        let versionWithoutV = version.hasPrefix("v") ? String(version.dropFirst()) : version
+        guard let downloadURLString = findAssetURL(in: assets, version: versionWithoutV),
+              let downloadURL = URL(string: downloadURLString) else {
+            throw KernelUpdaterError.downloadURLNotFound
+        }
+
+        return downloadURL
     }
 
-    /// 下载并安装内核
-    private func downloadAndInstallKernel(from url: URL) async throws {
+    /// 下载内核到临时目录
+    func downloadKernel(from url: URL) async throws -> URL {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("mihomo_update")
         let gzPath = tempDir.appendingPathComponent("mihomo.gz")
         let mihomoBin = tempDir.appendingPathComponent("mihomo")
@@ -176,25 +108,76 @@ final class KernelUpdater {
         // 设置可执行权限 (r-xr-xr-x)
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: mihomoBin.path)
 
-        // 替换现有内核
+        logger.info("Kernel downloaded to: \(mihomoBin.path, privacy: .public)")
+        return mihomoBin
+    }
+
+    /// 安装内核到 bundle
+    func installKernel(from downloadedPath: URL) throws {
         let targetPath = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/mihomo")
-
-        // 停止当前服务
-        mihomoService.stop()
-
-        // 等待进程真正退出
-        try await Task.sleep(nanoseconds: 1_000_000_000) // 1秒
 
         // 替换 bundle 中的内核
         if FileManager.default.fileExists(atPath: targetPath.path) {
             try FileManager.default.removeItem(atPath: targetPath.path)
         }
-        try FileManager.default.copyItem(at: mihomoBin, to: targetPath)
+        try FileManager.default.copyItem(at: downloadedPath, to: targetPath)
 
         // 清理临时文件
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("mihomo_update")
         try? FileManager.default.removeItem(at: tempDir)
 
-        logger.info("Kernel updated successfully")
+        logger.info("Kernel installed successfully")
+    }
+
+    /// 更新内核（由调用方控制停止/启动）
+    func updateKernel() async -> KernelUpdateResult {
+        do {
+            // 检查版本
+            let version = try await checkForUpdate()
+
+            // 获取下载链接
+            let downloadURL = try await getDownloadURL(version: version)
+
+            // 下载
+            let downloadedPath = try await downloadKernel(from: downloadURL)
+
+            // 安装
+            try installKernel(from: downloadedPath)
+
+            // 更新内存中的版本号
+            mihomoService.updateKernelVersion(version)
+
+            return .updated(newVersion: version)
+        } catch {
+            return .failed(error)
+        }
+    }
+
+    /// 在 GitHub assets 中查找匹配的下载链接
+    private func findAssetURL(in assets: [[String: Any]], version: String) -> String? {
+        // 优先查找精确版本且不带 go 的 darwin-arm64 版本
+        for asset in assets {
+            guard let name = asset["name"] as? String,
+                  name.hasPrefix("mihomo-darwin-arm64-"),
+                  name.hasSuffix(".gz"),
+                  name.hasPrefix("mihomo-darwin-arm64-v\(version).gz"),
+                  !name.contains("go") else {
+                continue
+            }
+            return asset["browser_download_url"] as? String
+        }
+
+        // 如果没找到，尝试查找任意匹配的 darwin-arm64 版本
+        for asset in assets {
+            guard let name = asset["name"] as? String,
+                  name.hasPrefix("mihomo-darwin-arm64-"),
+                  name.contains("-\(version).gz") else {
+                continue
+            }
+            return asset["browser_download_url"] as? String
+        }
+
+        return nil
     }
 }
 

@@ -33,19 +33,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        // 检查配置是否存在，不存在则先下载，然后启动内核（不设置系统代理）
+        // 检查配置是否存在，不存在则先下载，然后启动内核、更新状态栏图标、获取内核版本、加载代理列表并更新菜单
         Task {
             do {
                 if !configManager.runtimeConfigFileExists {
                     _ = try await configManager.downloadAndValidateConfig(url: configManager.subscriptionURL)
                 }
-                try await mihomoService.start(setProxy: false)
-                statusBarController.updateStatusIcon(isRunning: mihomoService.isRunning)
+                try await mihomoService.start() // 启动内核
+                statusBarController.updateStatusIcon(isRunning: true)
             } catch {
                 statusBarController.updateStatusIcon(isRunning: false)
             }
-            // 无论内核是否启动成功，都尝试加载代理列表并更新菜单
-            await proxyManager.refreshProxyList()
+
+            // 并行获取版本号和代理列表
+            async let version: () = mihomoService.fetchKernelVersion()
+            async let proxies: () = proxyManager.refreshProxyList()
+
+            // 等待两者完成
+            _ = await (version, proxies)
+
+            // 更新菜单
             if let menu = menuController?.buildMenu() {
                 statusBarController.setMenu(menu)
             }
@@ -117,7 +124,13 @@ extension AppDelegate: MenuControllerDelegate {
 
     func updateKernel() {
         Task { [weak self] in
+            // 1. 先停止内核
+            self?.mihomoService.stop()
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 等待进程退出
+
+            // 2. 下载并安装新内核
             let result = await KernelUpdater.shared.updateKernel()
+
             await MainActor.run {
                 switch result {
                 case .alreadyLatest:
@@ -129,8 +142,7 @@ extension AppDelegate: MenuControllerDelegate {
                     alert.runModal()
 
                 case .updated(let newVersion):
-                    // 更新成功，停内核 → 启动内核
-                    self?.mihomoService.stop()
+                    // 3. 启动新内核
                     Task {
                         try? await self?.mihomoService.start()
                         await MainActor.run {
@@ -152,7 +164,8 @@ extension AppDelegate: MenuControllerDelegate {
     }
 
     func quitApp() {
-        mihomoService.stop()
-        NSApplication.shared.terminate(nil)
+        mihomoService.stop() // 停止内核
+        try? mihomoService.setSystemProxy(enabled: false) // 关闭系统代理
+        NSApplication.shared.terminate(nil) // 退出应用
     }
 }

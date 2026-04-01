@@ -31,7 +31,7 @@ final class MihomoService: ObservableObject {
 
     /// 启动 Mihomo
     /// - Parameter setProxy: 是否设置系统代理（默认 true）
-    func start(setProxy: Bool = true) async throws {
+    func start() async throws {
         guard !isRunning else { return }
 
         try cleanupStaleProcesses()
@@ -91,39 +91,22 @@ final class MihomoService: ObservableObject {
             }
 
             updateRunningState(true)
-            if setProxy {
-                try setSystemProxy(enabled: true)
-            }
-            await fetchKernelVersion()
 
         } catch {
-            // setSystemProxy 或 fetchKernelVersion 失败
             if process.isRunning {
                 process.terminate()
             }
             self.process = nil
             self.apiUrl = nil
             updateRunningState(false)
-            // 如果 setProxy 失败，不需要再清除代理
-            if setProxy {
-                try? setSystemProxy(enabled: false)
-            }
             logger.error("Failed to start mihomo: \(error.localizedDescription, privacy: .public)")
             throw MihomoError.failedToStart(error, details: recentOutput)
         }
     }
 
-    /// 停止 Mihomo
+    /// 停止 Mihomo 内核（不清除系统代理）
     func stop() {
-        logger.info("Stopping mihomo, isRunning: \(self.isRunning), hasProcess: \(self.process != nil)")
-
-        // 清除系统代理（无论 process 是否存在）
-        do {
-            try setSystemProxy(enabled: false)
-            logger.info("Disabled system SOCKS proxy")
-        } catch {
-            logger.error("Failed to disable system proxy: \(error.localizedDescription, privacy: .public)")
-        }
+        logger.info("Stopping mihomo kernel")
 
         guard let process = process else {
             return
@@ -445,9 +428,9 @@ extension MihomoService {
 
         let url = apiUrl.appendingPathComponent("version")
 
-        for attempt in 0..<3 {
+        for attempt in 0..<2 {
             var request = URLRequest(url: url)
-            request.timeoutInterval = 5
+            request.timeoutInterval = 2
 
             do {
                 let (data, _) = try await URLSession.shared.data(for: request)
@@ -458,13 +441,13 @@ extension MihomoService {
                 }
             } catch {
                 // 只在最后一次失败时记录错误
-                if attempt == 2 {
+                if attempt == 1 {
                     logger.error("Failed to fetch kernel version: \(error.localizedDescription, privacy: .public)")
                 }
             }
 
-            if attempt < 2 {
-                try? await Task.sleep(nanoseconds: 500_000_000) // 重试前等待 0.5 秒
+            if attempt < 1 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
     }
