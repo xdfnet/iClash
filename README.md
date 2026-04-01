@@ -9,9 +9,11 @@
 ## 特性
 
 - **纯菜单栏应用** — 不占用 Dock 图标，轻量简洁
-- **启动即连接** — 应用启动后自动连接代理
+- **启动即内核** — 应用启动后自动启动 Mihomo 内核，不自动设置系统代理
+- **代理控制分离** — 内核启动/停止与系统代理设置相互独立
 - **订阅支持** — 支持自定义订阅地址，自动拉取节点配置
-- **系统代理** — 自动设置 SOCKS 系统代理
+- **AnyTLS 支持** — 支持 AnyTLS 协议订阅自动转换为完整配置
+- **系统代理** — 点击"启动代理"后自动设置 SOCKS 系统代理
 - **内置内核** — Mihomo 内核随应用打包，无需手动安装
 - **内核更新** — 支持一键检查和更新稳定版内核
 
@@ -36,29 +38,48 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build
 
 ### 2. 使用
 
-1. 运行应用，菜单栏会出现 iClash 图标（圆点表示运行状态）
-2. 点击图标查看代理节点列表
-3. 选择节点切换代理
-4. 点击"设置订阅"修改订阅地址
-5. 点击"内核版本"检查内核更新
-
-### 3. 配置订阅
-
-订阅地址保存在应用配置中（UserDefaults）：
-
-1. 点击菜单栏图标
-2. 点击"设置订阅"
-3. 输入订阅地址并保存
-4. 应用自动重新加载配置
+1. 运行应用，菜单栏会出现 iClash 图标
+2. 内核自动启动（不自动设置系统代理）
+3. 点击"启动代理"启用系统代理
+4. 点击"切换节点"子菜单选择代理节点
+5. 点击"版本更新"检查内核更新
+6. 点击"退出"关闭内核并退出应用
 
 ## 菜单说明
 
 | 选项 | 说明 |
 |------|------|
-| 切换节点 | 查看和切换代理节点 |
-| 设置订阅 | 修改订阅地址 |
+| 启动代理 | 设置系统 SOCKS 代理指向 127.0.0.1:7890 |
+| 停止代理 | 清除系统代理设置 |
+| 切换节点 | 子菜单显示代理组和节点，可切换节点 |
 | 版本更新 | 查看当前/最新内核版本，可一键更新 |
-| 退出 | 关闭代理并退出应用 |
+| 退出 | 停止内核并退出应用 |
+
+## 工作原理
+
+### 启动流程
+
+```
+应用启动 → 检查配置是否存在 → 不存在则下载订阅 → 启动内核 → 加载代理列表
+```
+
+### 内核与代理控制
+
+- **内核**：负责代理协议的连接管理
+- **系统代理**：将系统流量转发到内核的 SOCKS 端口（7890）
+
+两者相互独立：
+- 停止代理只清除系统代理设置，内核继续运行
+- 退出应用会停止内核并清除系统代理
+
+### 订阅配置
+
+订阅地址保存在应用配置中（UserDefaults），默认订阅地址在首次启动时自动使用。
+
+订阅返回的内容会被自动处理：
+- **Base64 编码** → 自动解码
+- **AnyTLS URI 列表** → 自动转换为完整的 Clash YAML 配置
+- **完整配置** → 直接使用
 
 ## 内核版本
 
@@ -66,7 +87,7 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build
 
 应用内置一键更新稳定版内核功能：
 
-1. 点击菜单栏"内核版本"
+1. 点击菜单栏"版本更新"
 2. 查看当前内核版本和最新稳定版
 3. 版本不同时点击"更新"即可
 
@@ -96,14 +117,14 @@ iClash/
 ├── iClash.xcodeproj/          # Xcode 项目
 └── iClashSource/
     ├── iClashApp.swift        # 应用入口 + AppDelegate
-    ├── AppSettings.swift       # 应用设置（订阅地址）
-    ├── MihomoService.swift     # 内核管理 + API
-    ├── ConfigManager.swift     # 配置管理 + YAML解析
-    ├── ProxyManager.swift       # 代理列表缓存管理
-    ├── StatusBarController.swift # 状态栏控制
+    ├── AppSettings.swift       # 应用设置（订阅地址、UserDefaults）
+    ├── DefaultRules.swift      # 默认规则配置（DNS、分流规则）
+    ├── MihomoService.swift     # 内核管理 + API + 系统代理设置
+    ├── ConfigManager.swift     # 配置管理 + 订阅下载 + YAML解析
+    ├── ProxyManager.swift      # 代理列表缓存管理
+    ├── StatusBarController.swift # 状态栏图标控制
     ├── MenuController.swift    # 菜单构建和交互
-    ├── SettingsWindowController.swift # 设置窗口
-    ├── KernelUpdater.swift      # 内核更新逻辑
+    ├── KernelUpdater.swift     # 内核更新逻辑
     ├── Resources/
     │   ├── Assets.xcassets/   # 图标资源
     │   ├── Country.mmdb      # GeoIP 数据库

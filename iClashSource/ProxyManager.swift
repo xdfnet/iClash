@@ -1,9 +1,12 @@
 import Foundation
+import os.log
 
 /// 代理管理器 - 负责代理列表缓存和选择逻辑
 @MainActor
 final class ProxyManager {
     static let shared = ProxyManager()
+
+    private let logger = Logger(subsystem: "com.iclash.macos", category: "ProxyManager")
 
     private(set) var proxyGroups: [(name: String, proxies: [String])] = []
     private(set) var currentSelections: [String: String] = [:]
@@ -54,7 +57,7 @@ final class ProxyManager {
             currentSelections = selections
             lastRefreshTime = Date()
         } catch {
-            print("[iClash] 加载代理列表失败: \(error)")
+            logger.error("Failed to load proxy list: \(error.localizedDescription, privacy: .public)")
         }
 
         isLoading = false

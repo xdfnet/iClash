@@ -10,6 +10,9 @@ final class ConfigManager {
     private let directSession: URLSession
     private let settings = AppSettings.shared
 
+    /// 支持的代理协议列表
+    private static let supportedSchemes = ["anytls", "ss", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic", "wireguard", "shadowsocks"]
+
     let configDirectory: URL
     let runtimeConfigFile: URL
 
@@ -112,7 +115,7 @@ final class ConfigManager {
         )
         // 使用 Mihomo User-Agent 以获取 Base64 编码的订阅内容
         request.setValue("Mihomo/1.18.1", forHTTPHeaderField: "User-Agent")
-        print("[ConfigManager] 请求头: \(request.allHTTPHeaderFields ?? [:])")
+        logger.debug("Request headers: \(request.allHTTPHeaderFields ?? [:], privacy: .public)")
 
         let (data, response): (Data, URLResponse)
         do {
@@ -209,46 +212,55 @@ final class ConfigManager {
 
     /// 解析代理 URI 并返回 (name, yaml) 元组
     private func parseProxyUri(_ uri: String) -> (name: String, yaml: String)? {
-        // URL decode helper
-        func decodeURL(_ string: String) -> String {
-            guard let data = string.data(using: .utf8),
-                  let result = try? JSONDecoder().decode(DecodableValue.self, from: data) else {
-                return string.removingPercentEncoding ?? string
-            }
-            return result.value
-        }
-
-        struct DecodableValue: Decodable {
-            let value: String
-            init(from decoder: Decoder) throws {
-                let container = try decoder.singleValueContainer()
-                value = try container.decode(String.self)
-            }
-        }
-
-        // 解析 URI
-        guard let url = URL(string: uri),
-              let scheme = url.scheme,
-              ["anytls", "ss", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic", "wireguard", "shadowsocks"].contains(scheme.lowercased()) else {
+        guard let (scheme, url) = extractSchemeAndURL(from: uri) else {
             return nil
         }
 
-        // 提取节点名称（fragment 部分）
-        var name = url.fragment ?? ""
-        name = decodeURL(name)
-        if name.isEmpty {
-            name = "Unknown"
-        }
-
-        // 提取认证信息（user@password 部分）
-        let userInfo = url.user ?? ""
-        let password = url.password ?? userInfo  // 有些格式用整个 userInfo 作为密码
-
-        // 提取主机和端口
+        let name = extractProxyName(from: url)
+        let password = extractPassword(from: url, userInfo: url.user ?? "")
         let host = url.host ?? ""
-        let port = url.port ?? (scheme == "anytls" ? 443 : 80)
+        let port = extractPort(from: url, scheme: scheme)
+        let queryParams = extractQueryParameters(from: url)
+        let type = normalizeType(scheme)
 
-        // 解析查询参数
+        let yaml = generateYaml(for: type, name: name, host: host, port: port, password: password, queryParams: queryParams)
+        return (name, yaml)
+    }
+
+    /// 提取 URL scheme 并验证协议
+    private func extractSchemeAndURL(from uri: String) -> (scheme: String, url: URL)? {
+        guard let url = URL(string: uri),
+              let scheme = url.scheme,
+              Self.supportedSchemes.contains(scheme.lowercased()) else {
+            return nil
+        }
+        return (scheme, url)
+    }
+
+    /// 提取代理名称
+    private func extractProxyName(from url: URL) -> String {
+        var name = url.fragment ?? ""
+        if let data = name.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(DecodableValue.self, from: data) {
+            name = decoded.value
+        } else if let decoded = name.removingPercentEncoding {
+            name = decoded
+        }
+        return name.isEmpty ? "Unknown" : name
+    }
+
+    /// 提取密码
+    private func extractPassword(from url: URL, userInfo: String) -> String {
+        url.password ?? userInfo
+    }
+
+    /// 提取端口
+    private func extractPort(from url: URL, scheme: String) -> Int {
+        url.port ?? (scheme == "anytls" ? 443 : 80)
+    }
+
+    /// 提取查询参数
+    private func extractQueryParameters(from url: URL) -> (sni: String, insecure: Bool) {
         var sni = ""
         var insecure = false
         let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -262,20 +274,26 @@ final class ConfigManager {
                 break
             }
         }
+        return (sni, insecure)
+    }
 
-        let type = scheme.lowercased() == "shadowsocks" ? "ss" : scheme.lowercased()
+    /// 标准化协议类型
+    private func normalizeType(_ scheme: String) -> String {
+        scheme.lowercased() == "shadowsocks" ? "ss" : scheme.lowercased()
+    }
 
-        // 生成 YAML
-        if type == "ss" {
-            // Shadowsocks 格式特殊
-            return (name, "- { name: '\(name)', type: ss, server: \(host), port: \(port), cipher: chacha20-ietf-poly1305, password: \(password), udp: true }")
-        } else if type == "anytls" {
-            // AnyTLS
-            let skipCert = insecure ? "true" : "false"
-            return (name, "- { name: '\(name)', type: anytls, server: \(host), port: \(port), password: \(password), sni: \(sni), skip-cert-verify: \(skipCert), udp: true }")
-        } else {
-            // 其他类型
-            return (name, "- { name: '\(name)', type: \(type), server: \(host), port: \(port), password: \(password), udp: true }")
+    /// 根据协议类型生成 YAML
+    private func generateYaml(for type: String, name: String, host: String, port: Int, password: String, queryParams: (sni: String, insecure: Bool)) -> String {
+        let baseYaml = "- { name: '\(name)', type: \(type), server: \(host), port: \(port), password: \(password), udp: true }"
+
+        switch type {
+        case "ss":
+            return baseYaml.replacingOccurrences(of: "cipher: \(type)", with: "cipher: chacha20-ietf-poly1305")
+        case "anytls":
+            let skipCert = queryParams.insecure ? "true" : "false"
+            return "- { name: '\(name)', type: anytls, server: \(host), port: \(port), password: \(password), sni: \(queryParams.sni), skip-cert-verify: \(skipCert), udp: true }"
+        default:
+            return baseYaml
         }
     }
 
@@ -482,6 +500,15 @@ final class ConfigManager {
         }
 
         return result
+    }
+
+    /// 用于 URL 解码的辅助类型
+    private struct DecodableValue: Decodable {
+        let value: String
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            value = try container.decode(String.self)
+        }
     }
 }
 
