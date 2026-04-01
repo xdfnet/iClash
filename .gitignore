@@ -1,12 +1,42 @@
+# Xcode
 *.xcodeproj/
 *.xcworkspace/
 xcuserdata/
 *.xcuserstate
-.DS_Store
-build/
-DerivedData/
 *.xccheckout
 *.moved-aside
 *.pbxuser
 *.perspective
 *.perspectivev3
+
+# macOS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Build
+build/
+DerivedData/
+*.build/
+
+# IDE
+.idea/
+*.hmap
+*.ipa
+*.dSYM.zip
+
+# Swift Package Manager
+.swiftpm/
+Packages/
+*.xcodeproj
+
+# CocoaPods
+# Pods/
+# *.xcworkspace
+
+# Misc
+*.log
+
+# Claude Code
+.claude/
