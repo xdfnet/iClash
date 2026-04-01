@@ -75,11 +75,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
 
         if proxyManager.proxyGroups.isEmpty && !proxyManager.isLoadingProxies {
-            submenu.addItem(NSMenuItem(title: "正在加载...", action: nil, keyEquivalent: ""))
-            Task {
-                await proxyManager.refreshProxyList()
-                delegate?.menuNeedsUpdate()
-            }
+            submenu.addItem(NSMenuItem(title: "无可用代理", action: nil, keyEquivalent: ""))
             return submenu
         }
 
@@ -177,7 +173,6 @@ final class MenuController: NSObject, NSMenuDelegate {
 
 protocol MenuControllerDelegate: AnyObject {
     func menuWillOpen()
-    func menuNeedsUpdate()
     func selectProxy(name: String, in group: String)
     func toggleProxy()
     func updateKernel()
