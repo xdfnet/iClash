@@ -139,7 +139,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             let latestVersion = await KernelUpdater.shared.fetchLatestVersion() ?? "获取失败"
 
             let alert = NSAlert()
-            alert.messageText = "内核版本"
+            alert.messageText = "版本更新"
             alert.informativeText = "当前内核版本: \(currentVersion)\n最新内核版本: \(latestVersion)"
             alert.alertStyle = .informational
 
