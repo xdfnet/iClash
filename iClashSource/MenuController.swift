@@ -34,8 +34,8 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
         menu.addItem(settingsItem)
 
-        // 内核版本
-        let selectorItem = NSMenuItem(title: "内核版本", action: #selector(showKernelInfo), keyEquivalent: "")
+        // 版本更新
+        let selectorItem = NSMenuItem(title: "版本更新", action: #selector(showKernelInfo), keyEquivalent: "")
         selectorItem.target = self
         if let img = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Kernel") {
             img.isTemplate = true
