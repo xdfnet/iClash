@@ -1,23 +1,27 @@
 import Foundation
 
 /// 配置文件管理器
+@MainActor
 final class ConfigManager {
     static let shared = ConfigManager()
 
     let configDirectory: URL
     let runtimeConfigFile: URL
 
-    private var settings: AppSettings {
-        AppSettings.load()
-    }
+    private var cachedSubscriptionURL: String = ""
 
     var subscriptionURL: String {
-        get { settings.subscriptionURL }
+        get { cachedSubscriptionURL }
         set {
-            var newSettings = AppSettings.load()
-            newSettings.subscriptionURL = newValue
-            newSettings.save()
+            cachedSubscriptionURL = newValue
+            let defaults = UserDefaults.standard
+            defaults.set(newValue, forKey: AppSettings.subscriptionURLKey)
         }
+    }
+
+    /// 重新加载设置
+    private func reloadSettings() {
+        cachedSubscriptionURL = UserDefaults.standard.string(forKey: AppSettings.subscriptionURLKey) ?? ""
     }
 
     /// 运行时配置文件是否存在
@@ -29,6 +33,7 @@ final class ConfigManager {
         let home = FileManager.default.homeDirectoryForCurrentUser
         configDirectory = home.appendingPathComponent(".config/iclash", isDirectory: true)
         runtimeConfigFile = configDirectory.appendingPathComponent("config.yaml")
+        reloadSettings()
         try? createDirectoryIfNeeded()
         try? ensureGeoIPExists()
     }
@@ -39,19 +44,21 @@ final class ConfigManager {
         guard !FileManager.default.fileExists(atPath: geoipPath.path) else { return }
 
         // 从 app bundle 复制
-        let bundleGeoIP = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/Country.mmdb")
-        if FileManager.default.fileExists(atPath: bundleGeoIP.path) {
-            try FileManager.default.copyItem(at: bundleGeoIP, to: geoipPath)
+        if let resourcePath = Bundle.main.resourceURL {
+            let bundleGeoIP = resourcePath.appendingPathComponent("Country.mmdb")
+            if FileManager.default.fileExists(atPath: bundleGeoIP.path) {
+                try FileManager.default.copyItem(at: bundleGeoIP, to: geoipPath)
+            }
         }
     }
 
+    /// 确保基础配置目录存在（在 init 中已自动创建）
     func ensureBaseConfigurationExists() throws {
-        try createDirectoryIfNeeded()
+        // 目录已在 init 中创建
     }
 
     /// 获取运行时配置文件路径，如果可行会先刷新远程订阅
     func prepareRuntimeConfigFile() async throws -> URL {
-        // 订阅地址为空时，不创建配置文件
         guard !subscriptionURL.isEmpty else {
             throw ConfigError.subscriptionNotConfigured
         }
@@ -62,7 +69,6 @@ final class ConfigManager {
             if FileManager.default.fileExists(atPath: runtimeConfigFile.path) {
                 return runtimeConfigFile
             }
-            // 订阅失败且无本地配置，抛出错误（不创建默认配置）
             throw error
         }
 
@@ -71,70 +77,14 @@ final class ConfigManager {
 
     /// 下载订阅并保存到 config.yaml
     func downloadAndValidateConfig(url: String) async throws -> URL {
-        guard let subscriptionURL = URL(string: url) else {
+        guard URL(string: url) != nil else {
             throw ConfigError.invalidSubscriptionURL
         }
 
-        let request = URLRequest(
-            url: subscriptionURL,
-            cachePolicy: .reloadIgnoringLocalCacheData,
-            timeoutInterval: 30
-        )
-
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch {
-            throw ConfigError.networkError(error)
-        }
-
-        if let httpResponse = response as? HTTPURLResponse,
-           !(200...299).contains(httpResponse.statusCode) {
-            throw ConfigError.invalidResponse
-        }
-
-        guard !data.isEmpty else {
-            throw ConfigError.emptySubscription
-        }
-
-        let content = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !content.isEmpty else {
-            throw ConfigError.emptySubscription
-        }
-
-        if content.contains("\"error\"") && content.localizedCaseInsensitiveContains("access denied") {
-            throw ConfigError.subscriptionBlocked
-        }
-
-        // 保存到配置文件
+        let content = try await downloadSubscriptionContent(from: url)
         try Data(content.utf8).write(to: runtimeConfigFile, options: .atomic)
 
         return runtimeConfigFile
-    }
-
-    /// 创建默认配置
-    private func createDefaultConfiguration() throws {
-        let defaultConfig = """
-        port: 7890
-        socks-port: 7891
-        http-port: 7892
-        allow-lan: false
-        mode: rule
-        log-level: info
-        external-controller: 127.0.0.1:9090
-
-        proxies: []
-        proxy-groups:
-          - name: "Proxy"
-            type: select
-            proxies: []
-
-        rules:
-          - GEOIP,CN,DIRECT
-          - MATCH,Proxy
-        """
-        try defaultConfig.write(to: runtimeConfigFile, atomically: true, encoding: .utf8)
     }
 
     /// 从订阅地址生成运行配置
@@ -142,7 +92,14 @@ final class ConfigManager {
         guard !subscriptionURL.isEmpty else {
             throw ConfigError.subscriptionNotConfigured
         }
-        guard let subscriptionURL = URL(string: subscriptionURL) else {
+
+        let content = try await downloadSubscriptionContent(from: subscriptionURL)
+        try Data(content.utf8).write(to: runtimeConfigFile, options: .atomic)
+    }
+
+    /// 下载订阅内容并验证
+    private func downloadSubscriptionContent(from urlString: String) async throws -> String {
+        guard let subscriptionURL = URL(string: urlString) else {
             throw ConfigError.invalidSubscriptionURL
         }
 
@@ -178,7 +135,7 @@ final class ConfigManager {
             throw ConfigError.subscriptionBlocked
         }
 
-        try Data(content.utf8).write(to: runtimeConfigFile, options: .atomic)
+        return content
     }
 
     private func createDirectoryIfNeeded() throws {

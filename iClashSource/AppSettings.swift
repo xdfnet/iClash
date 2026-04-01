@@ -1,10 +1,12 @@
 import Foundation
 
 /// 应用设置（订阅地址等）
-struct AppSettings {
+/// 注意：此类应在主线程或通过 MainActor 访问，以确保线程安全
+@MainActor
+final class AppSettings {
     var subscriptionURL: String = ""
 
-    private static let subscriptionURLKey = "subscriptionURL"
+    static let subscriptionURLKey = "subscriptionURL"
 
     /// 加载设置
     static func load() -> AppSettings {

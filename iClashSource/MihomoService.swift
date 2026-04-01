@@ -15,6 +15,16 @@ final class MihomoService: ObservableObject {
     private let socksPort: UInt16 = 7891
     private let statusNotification = Notification.Name("MihomoStatusChanged")
 
+    /// 内核版本
+    private(set) var kernelVersion: String = "未知"
+
+    /// 更新内核版本（供外部调用）
+    func updateKernelVersion(_ version: String) {
+        kernelVersion = version
+    }
+
+    private let queue = DispatchQueue(label: "com.iclash.mihomo-service", attributes: .concurrent)
+
     private init() {}
 
     /// 启动 Mihomo
@@ -74,6 +84,7 @@ final class MihomoService: ObservableObject {
 
             updateRunningState(true)
             try setSystemProxy(enabled: true)
+            await fetchKernelVersion()
 
         } catch {
             if process.isRunning {
@@ -148,37 +159,24 @@ final class MihomoService: ObservableObject {
 
     /// 设置或清除系统代理（使用 SOCKS 代理）
     private func setSystemProxy(enabled: Bool) throws {
-        let service = "Wi-Fi"
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+        let services = fetchActiveNetworkServices()
+        for service in services {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
 
-        if enabled {
-            // 设置 SOCKS 代理
-            task.arguments = ["-setsocksfirewallproxy", service, "127.0.0.1", "\(socksPort)"]
-        } else {
-            // 关闭 SOCKS 代理
-            task.arguments = ["-setsocksfirewallproxystate", service, "off"]
+            if enabled {
+                task.arguments = ["-setsocksfirewallproxy", service, "127.0.0.1", "\(socksPort)"]
+            } else {
+                task.arguments = ["-setsocksfirewallproxystate", service, "off"]
+            }
+
+            try task.run()
+            task.waitUntilExit()
         }
-
-        try task.run()
-        task.waitUntilExit()
     }
 
-    private func runNetworkSetup(arguments: [String]) -> Int32 {
-        let task = Process()
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
-        task.arguments = arguments
-        task.standardOutput = outputPipe
-        task.standardError = errorPipe
-        task.environment = ProcessInfo.processInfo.environment
-        try? task.run()
-        task.waitUntilExit()
-        return task.terminationStatus
-    }
-
-    private func fetchActiveNetworkServices() throws -> [String] {
+    /// 获取当前活跃的网络服务列表
+    private func fetchActiveNetworkServices() -> [String] {
         let task = Process()
         let outputPipe = Pipe()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
@@ -187,52 +185,53 @@ final class MihomoService: ObservableObject {
         task.standardError = outputPipe
         task.environment = ProcessInfo.processInfo.environment
 
-        try task.run()
-        task.waitUntilExit()
+        do {
+            try task.run()
+            task.waitUntilExit()
 
-        guard task.terminationStatus == 0 else {
-            throw MihomoError.networkServiceNotFound
-        }
-
-        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(decoding: data, as: UTF8.self)
-
-        fputs("[iClash] networksetup output:\n\(output)\n---end---\n", stderr)
-
-        // 解析输出，排除帮助文本和标题行
-        let knownKeywords = ["USB", "Wi-Fi", "Ethernet", "LAN", "Bluetooth", "Firewall", "Thunderbolt", "WiMAX", "WWAN", "LTE", "5G", "Shadowrocket"]
-
-        return output
-            .split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { line in
-                guard !line.isEmpty else { return false }
-                // 跳过标题行
-                if line.hasPrefix("An asterisk") || line.hasPrefix("networksetup") || line.contains("-") && !line.contains(" ") {
-                    return false
-                }
-                // 只保留包含已知网络设备关键词的行
-                let matches = knownKeywords.contains { kw in
-                    let result = line.contains(kw)
-                    fputs("[iClash]   checking line='\(line)' contains '\(kw)' = \(result)\n", stderr)
-                    return result
-                }
-                fputs("[iClash] line='\(line)', final matches=\(matches)\n", stderr)
-                return matches
+            guard task.terminationStatus == 0 else {
+                return ["Wi-Fi"] // 回退默认值
             }
+
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(decoding: data, as: UTF8.self)
+
+            let knownKeywords = ["Wi-Fi", "Ethernet", "Thunderbolt Bridge", "USB 10/100/1000", "WAN", "LAN"]
+
+            return output
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { line in
+                    guard !line.isEmpty else { return false }
+                    if line.hasPrefix("An asterisk") || line.hasPrefix("networksetup") {
+                        return false
+                    }
+                    return knownKeywords.contains { line.contains($0) }
+                }
+        } catch {
+            return ["Wi-Fi"] // 出错时回退默认值
+        }
     }
 
     private func handleProcessTermination() {
-        self.process = nil
-        self.apiUrl = nil
-        try? setSystemProxy(enabled: false)
-        updateRunningState(false)
+        queue.async(flags: .barrier) { [weak self] in
+            guard let self else { return }
+            let wasRunning = self.isRunning
+            self.process = nil
+            self.apiUrl = nil
+
+            if wasRunning {
+                try? self.setSystemProxy(enabled: false)
+            }
+            self.updateRunningState(false)
+        }
     }
 
     private func updateRunningState(_ isRunning: Bool) {
         DispatchQueue.main.async { [weak self] in
-            self?.isRunning = isRunning
-            NotificationCenter.default.post(name: self?.statusNotification ?? Notification.Name("MihomoStatusChanged"), object: nil)
+            guard let self else { return }
+            self.isRunning = isRunning
+            NotificationCenter.default.post(name: self.statusNotification, object: nil)
         }
     }
 }
@@ -298,6 +297,25 @@ extension MihomoService {
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) || httpResponse.statusCode == 204 else {
             throw MihomoError.apiSelectFailed
+        }
+    }
+
+    /// 获取内核版本
+    func fetchKernelVersion() async {
+        guard let apiUrl = apiUrl else { return }
+
+        let url = apiUrl.appendingPathComponent("version")
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let version = json["version"] as? String {
+                self.kernelVersion = version
+            }
+        } catch {
+            print("[MihomoService] 获取内核版本失败: \(error)")
         }
     }
 }
