@@ -2,6 +2,9 @@
   "permissions": {
     "additionalDirectories": [
       "/Users/apple/.claude"
+    ],
+    "allow": [
+      "Bash(xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build)"
     ]
   }
 }

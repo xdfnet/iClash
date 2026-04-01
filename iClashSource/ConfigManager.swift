@@ -80,18 +80,32 @@ final class ConfigManager {
         return runtimeConfigFile
     }
 
-    /// 下载订阅并保存到 config.yaml
-    func downloadAndValidateConfig(url: String) async throws -> URL {
+    /// 下载订阅并保存到 config.yaml（带重试）
+    func downloadAndValidateConfig(url: String, retryCount: Int = 3) async throws -> URL {
         guard URL(string: url) != nil else {
             throw ConfigError.invalidSubscriptionURL
         }
 
         logger.info("Downloading subscription from \(url, privacy: .private(mask: .hash))")
-        let content = try await downloadSubscriptionContent(from: url)
-        try Data(content.utf8).write(to: runtimeConfigFile, options: .atomic)
-        logger.info("Wrote runtime config to \(self.runtimeConfigFile.path, privacy: .public), size: \(content.count)")
 
-        return runtimeConfigFile
+        var lastError: Error?
+
+        for attempt in 0..<retryCount {
+            do {
+                let content = try await downloadSubscriptionContent(from: url)
+                try Data(content.utf8).write(to: runtimeConfigFile, options: .atomic)
+                logger.info("Wrote runtime config to \(self.runtimeConfigFile.path, privacy: .public), size: \(content.count)")
+                return runtimeConfigFile
+            } catch {
+                lastError = error
+                logger.warning("Download attempt \(attempt + 1) failed: \(error.localizedDescription, privacy: .public)")
+                if attempt < retryCount - 1 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000) // 等待 1 秒
+                }
+            }
+        }
+
+        throw lastError ?? ConfigError.networkError(NSError(domain: "ConfigManager", code: -1))
     }
 
     /// 从订阅地址生成运行配置
