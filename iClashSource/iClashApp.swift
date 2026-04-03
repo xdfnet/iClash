@@ -17,6 +17,7 @@ struct iClashApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusBarController = StatusBarController()
     private var menuController: MenuController?
+    private let appSettings = AppSettings.shared
     private let mihomoService = MihomoService.shared
     private let configManager = ConfigManager.shared
     private let proxyManager = ProxyManager.shared
@@ -32,6 +33,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSNotification.Name("MihomoStatusChanged"),
             object: nil
         )
+
+        guard appSettings.hasSubscriptionURL else {
+            statusBarController.updateStatusIcon(isRunning: false)
+            showError("""
+            未配置订阅地址。
+
+            请先设置环境变量 ICLASH_SUBSCRIPTION_URL，或在应用中保存订阅地址后再启动。
+            """)
+            return
+        }
 
         // 检查配置是否存在，不存在则先下载，然后启动内核、更新状态栏图标、获取内核版本、加载代理列表并更新菜单
         Task {
