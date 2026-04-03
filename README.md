@@ -23,7 +23,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/your-repo/iClash.git
+git clone https://github.com/xdfnet/iClash.git
 cd iClash
 
 # 安装 XcodeGen (如未安装)
@@ -32,8 +32,8 @@ brew install xcodegen
 # 生成 Xcode 项目
 xcodegen generate
 
-# 编译
-xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build
+# 编译并运行 Debug 版本
+make debug
 ```
 
 ### 2. 使用
@@ -56,6 +56,20 @@ launchctl setenv ICLASH_SUBSCRIPTION_URL "https://your-subscription-url"
 4. 点击"切换节点"子菜单选择代理节点
 5. 点击"版本更新"检查内核更新
 6. 点击"退出"关闭内核并退出应用
+
+### 3. Makefile
+
+项目内置了常用构建命令：
+
+```bash
+make help
+make debug
+make push MSG="your commit message"
+```
+
+说明：
+- `make debug` 会清理旧产物、构建 Debug 版本并直接启动应用
+- `make push` 会更新版本号、构建 Release、安装到 `/Applications`，然后提交并推送当前分支
 
 ## 菜单说明
 
@@ -148,6 +162,16 @@ launchctl setenv ICLASH_SUBSCRIPTION_URL "https://your-subscription-url"
 - **AnyTLS URI 列表** → 自动转换为完整的 Clash YAML 配置
 - **完整配置** → 直接使用
 
+## 内核来源
+
+本项目内置的代理内核来自 [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo)。
+
+- 上游仓库：`https://github.com/MetaCubeX/mihomo`
+- 发布地址：`https://github.com/MetaCubeX/mihomo/releases/latest`
+- 仓库内置路径：`iClashSource/Resources/mihomo`
+
+如需更新内核版本，可通过应用内的“版本更新”功能，或手动替换内置二进制文件。
+
 ## 内核版本
 
 ### 稳定版更新
@@ -179,6 +203,7 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build
 
 ```
 iClash/
+├── Makefile                   # 常用构建/发布命令
 ├── project.yml                 # XcodeGen 配置
 ├── iClash.entitlements        # 沙盒权限
 ├── iClash.xcodeproj/          # Xcode 项目
