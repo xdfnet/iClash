@@ -140,10 +140,17 @@ final class MenuController: NSObject, NSMenuDelegate {
         Task {
             let currentVersion = MihomoService.shared.kernelVersion
             let latestVersion = (try? await KernelUpdater.shared.checkForUpdate()) ?? "获取失败"
+            let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
+            let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "未知"
 
             let alert = NSAlert()
             alert.messageText = "版本更新"
-            alert.informativeText = "当前内核版本: \(currentVersion)\n最新内核版本: \(latestVersion)"
+            alert.informativeText = """
+            软件版本: \(appVersion)
+            构建版本: \(buildVersion)
+            当前内核版本: \(currentVersion)
+            最新内核版本: \(latestVersion)
+            """
             alert.alertStyle = .informational
 
             // 版本不一样时显示更新和关闭，一样时只显示关闭
