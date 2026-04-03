@@ -2,6 +2,7 @@ import Foundation
 import os.log
 
 /// Mihomo 内核管理服务
+@MainActor
 final class MihomoService: ObservableObject {
     static let shared = MihomoService()
 
@@ -24,7 +25,6 @@ final class MihomoService: ObservableObject {
         kernelVersion = version
     }
 
-    private let queue = DispatchQueue(label: "com.iclash.mihomo-service", attributes: .concurrent)
     private var recentOutput = ""
 
     private init() {}
@@ -62,13 +62,17 @@ final class MihomoService: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !output.isEmpty else { return }
 
-            self?.appendRecentOutput(output)
-            self?.logger.debug("[mihomo] \(output, privacy: .public)")
+            Task { @MainActor [weak self] in
+                self?.appendRecentOutput(output)
+                self?.logger.debug("[mihomo] \(output, privacy: .public)")
+            }
         }
         process.terminationHandler = { [weak self] process in
             outputPipe.fileHandleForReading.readabilityHandler = nil
-            self?.logger.error("mihomo terminated with status: \(process.terminationStatus)")
-            self?.handleProcessTermination()
+            Task { @MainActor [weak self] in
+                self?.logger.error("mihomo terminated with status: \(process.terminationStatus)")
+                self?.handleProcessTermination()
+            }
         }
 
         do {
@@ -336,25 +340,19 @@ final class MihomoService: ObservableObject {
     }
 
     private func handleProcessTermination() {
-        queue.async(flags: .barrier) { [weak self] in
-            guard let self else { return }
-            let wasRunning = self.isRunning
-            self.process = nil
-            self.apiUrl = nil
+        let wasRunning = isRunning
+        process = nil
+        apiUrl = nil
 
-            if wasRunning {
-                try? self.setSystemProxy(enabled: false)
-            }
-            self.updateRunningState(false)
+        if wasRunning {
+            try? setSystemProxy(enabled: false)
         }
+        updateRunningState(false)
     }
 
     private func updateRunningState(_ isRunning: Bool) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.isRunning = isRunning
-            NotificationCenter.default.post(name: self.statusNotification, object: nil)
-        }
+        self.isRunning = isRunning
+        NotificationCenter.default.post(name: statusNotification, object: nil)
     }
 }
 
