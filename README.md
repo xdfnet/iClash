@@ -81,6 +81,16 @@ make debug
 xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug -destination 'platform=macOS' build
 ```
 
+## 配置与订阅
+
+订阅内容下载后会自动识别并处理以下格式：
+
+- Base64 编码订阅内容
+- AnyTLS / SS / VMess / VLESS / Trojan / Hysteria / TUIC / WireGuard 等 URI 列表
+- 完整 Mihomo / Clash YAML 配置
+
+当订阅返回的是 URI 列表时，应用会自动生成运行时 YAML 配置，并拼接默认 DNS、代理组和规则配置。
+
 ## 使用说明
 
 1. 启动应用后，菜单栏会显示 iClash 图标
@@ -141,50 +151,6 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug -destin
 6. mihomoService.start()             重新启动内核
 ```
 
-## 配置与订阅
-
-订阅内容下载后会自动识别并处理以下格式：
-
-- Base64 编码订阅内容
-- AnyTLS / SS / VMess / VLESS / Trojan / Hysteria / TUIC / WireGuard 等 URI 列表
-- 完整 Mihomo / Clash YAML 配置
-
-当订阅返回的是 URI 列表时，应用会自动生成运行时 YAML 配置，并拼接默认 DNS、代理组和规则配置。
-
-## 内核来源
-
-本项目内置的代理内核来自 [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo)。
-
-- 上游仓库：`https://github.com/MetaCubeX/mihomo`
-- 发布地址：`https://github.com/MetaCubeX/mihomo/releases/latest`
-- 仓库内置路径：`iClashSource/Resources/mihomo`
-
-如需更新内核版本，可使用应用内“版本更新”功能，或手动替换内置二进制文件。
-
-## 许可证
-
-本项目采用 `MIT` 许可证发布。
-
-### 第三方组件
-
-- `Mihomo`：来自 `MetaCubeX/mihomo`，其许可证信息以上游项目为准
-
-发布或再分发本项目时，建议同时保留本项目许可证文本以及第三方组件的许可证与署名信息。
-
-## 手动更新内核
-
-如需手动更新内核，可从 Mihomo Releases 下载对应平台版本：
-
-- Apple Silicon: `mihomo-darwin-arm64-v{version}.gz`
-- Intel Mac: `mihomo-darwin-amd64-v{version}.gz`
-
-```bash
-gunzip -c mihomo-darwin-arm64-v{version}.gz > iClashSource/Resources/mihomo
-chmod +x iClashSource/Resources/mihomo
-xcodegen generate
-xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build
-```
-
 ## 开发命令
 
 项目根目录内置 `Makefile`，用于本地开发和发布流程。
@@ -199,6 +165,20 @@ make push MSG="your commit message"
 
 - `make debug`：清理旧构建产物，构建 Debug 版本并直接启动应用
 - `make push`：更新版本号、构建 Release、安装到 `/Applications`，然后提交并推送当前分支
+
+## 手动更新内核
+
+如需手动更新内核，可从 Mihomo Releases 下载对应平台版本：
+
+- Apple Silicon: `mihomo-darwin-arm64-v{version}.gz`
+- Intel Mac: `mihomo-darwin-amd64-v{version}.gz`
+
+```bash
+gunzip -c mihomo-darwin-arm64-v{version}.gz > iClashSource/Resources/mihomo
+chmod +x iClashSource/Resources/mihomo
+xcodegen generate
+xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build
+```
 
 ## 项目结构
 
@@ -225,6 +205,26 @@ iClash/
     └── Supporting/
         └── Info.plist
 ```
+
+## 内核来源
+
+本项目内置的代理内核来自 [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo)。
+
+- 上游仓库：`https://github.com/MetaCubeX/mihomo`
+- 发布地址：`https://github.com/MetaCubeX/mihomo/releases/latest`
+- 仓库内置路径：`iClashSource/Resources/mihomo`
+
+如需更新内核版本，可使用应用内“版本更新”功能，或手动替换内置二进制文件。
+
+## 许可证
+
+本项目采用 `MIT` 许可证发布。
+
+### 第三方组件
+
+- `Mihomo`：来自 `MetaCubeX/mihomo`，其许可证信息以上游项目为准
+
+发布或再分发本项目时，建议同时保留本项目许可证文本以及第三方组件的许可证与署名信息。
 
 ## 免责声明
 
