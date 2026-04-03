@@ -42,7 +42,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // 版本更新
-        let selectorItem = NSMenuItem(title: "版本更新", action: #selector(showKernelInfo), keyEquivalent: "")
+        let selectorItem = NSMenuItem(title: "软件版本", action: #selector(showKernelInfo), keyEquivalent: "")
         selectorItem.target = self
         if let img = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Kernel") {
             img.isTemplate = true
@@ -144,7 +144,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "未知"
 
             let alert = NSAlert()
-            alert.messageText = "版本更新"
+            alert.messageText = "版本信息"
             alert.informativeText = """
             软件版本: \(appVersion)
             构建版本: \(buildVersion)
