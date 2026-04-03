@@ -38,6 +38,18 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build
 
 ### 2. 使用
 
+先配置订阅地址环境变量：
+
+```bash
+export ICLASH_SUBSCRIPTION_URL="https://your-subscription-url"
+```
+
+如果你是从 Finder 或 Xcode 直接启动 `.app`，建议使用 `launchctl` 注入环境变量：
+
+```bash
+launchctl setenv ICLASH_SUBSCRIPTION_URL "https://your-subscription-url"
+```
+
 1. 运行应用，菜单栏会出现 iClash 图标
 2. 内核自动启动（不自动设置系统代理）
 3. 点击"启动代理"启用系统代理
@@ -115,7 +127,21 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug build
 
 ### 订阅配置
 
-订阅地址保存在应用配置中（UserDefaults），默认订阅地址在首次启动时自动使用。
+应用优先从系统环境变量 `ICLASH_SUBSCRIPTION_URL` 读取订阅地址。
+
+如果环境变量未设置，则回退到应用本地保存的订阅地址（`UserDefaults`）。
+
+示例：
+
+```bash
+export ICLASH_SUBSCRIPTION_URL="https://your-subscription-url"
+```
+
+对于 GUI 应用启动场景，可使用：
+
+```bash
+launchctl setenv ICLASH_SUBSCRIPTION_URL "https://your-subscription-url"
+```
 
 订阅返回的内容会被自动处理：
 - **Base64 编码** → 自动解码
@@ -158,7 +184,7 @@ iClash/
 ├── iClash.xcodeproj/          # Xcode 项目
 └── iClashSource/
     ├── iClashApp.swift        # 应用入口 + AppDelegate
-    ├── AppSettings.swift       # 应用设置（订阅地址、UserDefaults）
+    ├── AppSettings.swift       # 应用设置（环境变量、UserDefaults）
     ├── DefaultRules.swift      # 默认规则配置（DNS、分流规则）
     ├── MihomoService.swift     # 内核管理 + API + 系统代理设置
     ├── ConfigManager.swift     # 配置管理 + 订阅下载 + YAML解析
