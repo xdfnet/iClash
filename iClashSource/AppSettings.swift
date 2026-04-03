@@ -39,6 +39,10 @@ final class AppSettings {
         }
     }
 
+    var hasSubscriptionURL: Bool {
+        !subscriptionURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// 上次更新时间
     var lastUpdateTime: Date? {
         get {
