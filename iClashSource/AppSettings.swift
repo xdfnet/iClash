@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class AppSettings {
     static let shared = AppSettings()
+    static let subscriptionEnvironmentKey = "ICLASH_SUBSCRIPTION_URL"
 
     private let defaults = UserDefaults.standard
 
@@ -12,13 +13,26 @@ final class AppSettings {
         static let lastUpdateTime = "lastUpdateTime"
     }
 
-    /// 默认订阅地址
-    static let defaultSubscriptionURL = "https://boost.hobbyx.cn/d/ddb0b489d10d14ba2d8912b8d30bde03"
+    /// 默认订阅地址（仅读取环境变量）
+    static var defaultSubscriptionURL: String {
+        environmentSubscriptionURL ?? ""
+    }
+
+    static var environmentSubscriptionURL: String? {
+        let environmentValue = ProcessInfo.processInfo.environment[subscriptionEnvironmentKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let environmentValue, !environmentValue.isEmpty else {
+            return nil
+        }
+        return environmentValue
+    }
 
     /// 当前订阅地址
     var subscriptionURL: String {
         get {
-            defaults.string(forKey: Keys.subscriptionURL) ?? Self.defaultSubscriptionURL
+            Self.environmentSubscriptionURL
+                ?? defaults.string(forKey: Keys.subscriptionURL)
+                ?? Self.defaultSubscriptionURL
         }
         set {
             defaults.set(newValue, forKey: Keys.subscriptionURL)
