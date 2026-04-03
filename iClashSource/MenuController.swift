@@ -171,6 +171,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     }
 }
 
+@MainActor
 protocol MenuControllerDelegate: AnyObject {
     func menuWillOpen()
     func selectProxy(name: String, in group: String)
