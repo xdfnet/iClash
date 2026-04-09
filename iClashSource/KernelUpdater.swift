@@ -112,11 +112,16 @@ final class KernelUpdater {
         return mihomoBin
     }
 
-    /// 安装内核到 bundle
+    /// 安装内核到用户配置目录（Bundle 在安装后为只读）
     func installKernel(from downloadedPath: URL) throws {
-        let targetPath = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/mihomo")
+        let targetPath = configManager.configDirectory.appendingPathComponent("mihomo")
 
-        // 替换 bundle 中的内核
+        // 确保目录存在
+        if !FileManager.default.fileExists(atPath: configManager.configDirectory.path) {
+            try FileManager.default.createDirectory(at: configManager.configDirectory, withIntermediateDirectories: true)
+        }
+
+        // 替换用户目录中的内核
         if FileManager.default.fileExists(atPath: targetPath.path) {
             try FileManager.default.removeItem(atPath: targetPath.path)
         }
