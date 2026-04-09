@@ -4,7 +4,6 @@ import Foundation
 @MainActor
 final class AppSettings {
     static let shared = AppSettings()
-    static let subscriptionEnvironmentKey = "ICLASH_SUBSCRIPTION_URL"
 
     private let defaults = UserDefaults.standard
 
@@ -13,29 +12,19 @@ final class AppSettings {
         static let lastUpdateTime = "lastUpdateTime"
     }
 
-    /// 默认订阅地址（仅读取环境变量）
-    static var defaultSubscriptionURL: String {
-        environmentSubscriptionURL ?? ""
-    }
-
-    static var environmentSubscriptionURL: String? {
-        let environmentValue = ProcessInfo.processInfo.environment[subscriptionEnvironmentKey]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let environmentValue, !environmentValue.isEmpty else {
-            return nil
-        }
-        return environmentValue
-    }
-
     /// 当前订阅地址
     var subscriptionURL: String {
         get {
-            Self.environmentSubscriptionURL
-                ?? defaults.string(forKey: Keys.subscriptionURL)
-                ?? Self.defaultSubscriptionURL
+            (defaults.string(forKey: Keys.subscriptionURL) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
         set {
-            defaults.set(newValue, forKey: Keys.subscriptionURL)
+            let trimmedValue = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedValue.isEmpty {
+                defaults.removeObject(forKey: Keys.subscriptionURL)
+            } else {
+                defaults.set(trimmedValue, forKey: Keys.subscriptionURL)
+            }
         }
     }
 
@@ -57,7 +46,7 @@ final class AppSettings {
 
     /// 重置为默认设置
     func resetToDefaults() {
-        subscriptionURL = Self.defaultSubscriptionURL
+        subscriptionURL = ""
         lastUpdateTime = nil
     }
 }

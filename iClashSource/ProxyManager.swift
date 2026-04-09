@@ -78,4 +78,12 @@ final class ProxyManager {
     var isLoadingProxies: Bool {
         isLoading
     }
+
+    /// 清空缓存的代理状态
+    func reset() {
+        proxyGroups = []
+        currentSelections = [:]
+        lastRefreshTime = nil
+        isLoading = false
+    }
 }

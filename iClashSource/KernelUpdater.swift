@@ -4,7 +4,7 @@ import os.log
 /// 内核更新结果
 enum KernelUpdateResult {
     case alreadyLatest
-    case updated(newVersion: String)
+    case ready(newVersion: String, downloadedPath: URL)
     case failed(Error)
 }
 
@@ -24,6 +24,10 @@ final class KernelUpdater {
     /// 最新版本
     private(set) var latestVersion: String = ""
 
+    private var temporaryUpdateDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("mihomo_update")
+    }
+
     private init() {}
 
     /// 检查更新（获取最新版本号）
@@ -41,7 +45,9 @@ final class KernelUpdater {
             throw KernelUpdaterError.invalidResponse
         }
 
-        return tagName.hasPrefix("v") ? tagName : "v\(tagName)"
+        let normalizedVersion = tagName.hasPrefix("v") ? tagName : "v\(tagName)"
+        latestVersion = normalizedVersion
+        return normalizedVersion
     }
 
     /// 获取下载链接
@@ -70,7 +76,7 @@ final class KernelUpdater {
 
     /// 下载内核到临时目录
     func downloadKernel(from url: URL) async throws -> URL {
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("mihomo_update")
+        let tempDir = temporaryUpdateDirectory
         let gzPath = tempDir.appendingPathComponent("mihomo.gz")
         let mihomoBin = tempDir.appendingPathComponent("mihomo")
 
@@ -128,54 +134,61 @@ final class KernelUpdater {
         try FileManager.default.copyItem(at: downloadedPath, to: targetPath)
 
         // 清理临时文件
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("mihomo_update")
-        try? FileManager.default.removeItem(at: tempDir)
+        cleanupTemporaryDownload()
 
         logger.info("Kernel installed successfully")
     }
 
-    /// 更新内核（由调用方控制停止/启动）
+    func cleanupTemporaryDownload() {
+        try? FileManager.default.removeItem(at: temporaryUpdateDirectory)
+    }
+
+    func isCurrentKernelVersion(_ currentVersion: String, matching latestVersion: String) -> Bool {
+        normalizeVersion(currentVersion) == normalizeVersion(latestVersion)
+    }
+
+    /// 准备内核更新（下载完成后由调用方控制安装与重启）
     func updateKernel() async -> KernelUpdateResult {
         do {
-            // 检查版本
             let version = try await checkForUpdate()
+            if isCurrentKernelVersion(mihomoService.kernelVersion, matching: version) {
+                return .alreadyLatest
+            }
 
-            // 获取下载链接
             let downloadURL = try await getDownloadURL(version: version)
-
-            // 下载
             let downloadedPath = try await downloadKernel(from: downloadURL)
 
-            // 安装
-            try installKernel(from: downloadedPath)
-
-            // 更新内存中的版本号
-            mihomoService.updateKernelVersion(version)
-
-            return .updated(newVersion: version)
+            return .ready(newVersion: version, downloadedPath: downloadedPath)
         } catch {
+            cleanupTemporaryDownload()
             return .failed(error)
         }
     }
 
     /// 在 GitHub assets 中查找匹配的下载链接
     private func findAssetURL(in assets: [[String: Any]], version: String) -> String? {
-        // 优先查找精确版本且不带 go 的 darwin-arm64 版本
+        return findAssetURL(in: assets, version: version, preferredArchitecture: preferredArchitecture)
+    }
+
+    func findAssetURL(in assets: [[String: Any]], version: String, preferredArchitecture: String) -> String? {
+        let arch = preferredArchitecture
+
+        // 优先查找精确版本且不带 go 的当前架构版本
         for asset in assets {
             guard let name = asset["name"] as? String,
-                  name.hasPrefix("mihomo-darwin-arm64-"),
+                  name.hasPrefix("mihomo-darwin-\(arch)-"),
                   name.hasSuffix(".gz"),
-                  name.hasPrefix("mihomo-darwin-arm64-v\(version).gz"),
+                  name == "mihomo-darwin-\(arch)-v\(version).gz",
                   !name.contains("go") else {
                 continue
             }
             return asset["browser_download_url"] as? String
         }
 
-        // 如果没找到，尝试查找任意匹配的 darwin-arm64 版本
+        // 如果没找到，尝试查找任意匹配的当前架构版本
         for asset in assets {
             guard let name = asset["name"] as? String,
-                  name.hasPrefix("mihomo-darwin-arm64-"),
+                  name.hasPrefix("mihomo-darwin-\(arch)-"),
                   name.contains("-\(version).gz") else {
                 continue
             }
@@ -183,6 +196,28 @@ final class KernelUpdater {
         }
 
         return nil
+    }
+
+    var preferredArchitecture: String {
+        #if arch(arm64)
+        return "arm64"
+        #elseif arch(x86_64)
+        return "amd64"
+        #else
+        return "arm64"
+        #endif
+    }
+
+    func normalizeVersion(_ version: String) -> String? {
+        let pattern = #"v?\d+(?:\.\d+)+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: version, range: NSRange(version.startIndex..., in: version)),
+              let range = Range(match.range, in: version) else {
+            return nil
+        }
+
+        let extracted = String(version[range])
+        return extracted.hasPrefix("v") ? extracted : "v\(extracted)"
     }
 }
 

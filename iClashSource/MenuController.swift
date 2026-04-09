@@ -41,6 +41,16 @@ final class MenuController: NSObject, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        let settingsItem = NSMenuItem(title: "订阅设置", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        if let img = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings") {
+            img.isTemplate = true
+            settingsItem.image = img
+        }
+        menu.addItem(settingsItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         // 版本更新
         let selectorItem = NSMenuItem(title: "软件版本", action: #selector(showKernelInfo), keyEquivalent: "")
         selectorItem.target = self
@@ -132,6 +142,10 @@ final class MenuController: NSObject, NSMenuDelegate {
         delegate?.toggleProxy()
     }
 
+    @objc private func openSettings() {
+        delegate?.openSettings()
+    }
+
     @objc private func quitApp() {
         delegate?.quitApp()
     }
@@ -142,6 +156,8 @@ final class MenuController: NSObject, NSMenuDelegate {
             let latestVersion = (try? await KernelUpdater.shared.checkForUpdate()) ?? "获取失败"
             let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
             let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "未知"
+            let canOfferUpdate = latestVersion != "获取失败"
+                && !KernelUpdater.shared.isCurrentKernelVersion(currentVersion, matching: latestVersion)
 
             let alert = NSAlert()
             alert.messageText = "版本信息"
@@ -154,7 +170,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             alert.alertStyle = .informational
 
             // 版本不一样时显示更新和关闭，一样时只显示关闭
-            if currentVersion != latestVersion {
+            if canOfferUpdate {
                 alert.addButton(withTitle: "更新")
                 alert.addButton(withTitle: "关闭")
 
@@ -183,6 +199,7 @@ protocol MenuControllerDelegate: AnyObject {
     func menuWillOpen()
     func selectProxy(name: String, in group: String)
     func toggleProxy()
+    func openSettings()
     func updateKernel()
     func quitApp()
 }
