@@ -10,8 +10,8 @@ final class ConfigManager {
     private let directSession: URLSession
     private let settings = AppSettings.shared
 
-    /// 支持的代理协议列表
-    private static let supportedSchemes = ["anytls", "ss", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic", "wireguard", "shadowsocks"]
+    /// 当前可安全转换为 Mihomo 配置的 URI 协议
+    private static let convertibleSchemes = ["anytls", "ss", "shadowsocks"]
 
     let configDirectory: URL
     let runtimeConfigFile: URL
@@ -170,47 +170,85 @@ final class ConfigManager {
             logger.debug("Subscription content is not base64 or does not require decoding")
         }
 
-        // 如果内容是 URI 列表格式（以 anytls://, ss://, vmess:// 等开头）
-        // 则生成完整的配置
-        if isProxyUriList(content) {
-            logger.info("Detected proxy URI list, generating runtime YAML config")
-            content = generateConfigFromUriList(uriList: content)
-        } else {
-            logger.info("Subscription content is already a config file")
-        }
+        content = try normalizeSubscriptionContent(content)
 
         return content
     }
 
-    /// 判断内容是否为代理 URI 列表格式
-    private func isProxyUriList(_ content: String) -> Bool {
-        let uriPrefixes = ["anytls://", "ss://", "vmess://", "vless://", "trojan://", "shadowsocks://", "hysteria://", "hysteria2://", "tuic://", "wireguard://"]
-        let lines = content.components(separatedBy: .newlines)
-        // 至少有3行有效的 URI 才认为是 URI 列表
-        let uriLines = lines.filter { line in
-            uriPrefixes.contains { line.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix($0) }
+    func normalizeSubscriptionContent(_ content: String) throws -> String {
+        var normalizedContent = content
+
+        switch classifySubscriptionContent(normalizedContent) {
+        case .proxyURIList(let entries):
+            let unsupportedSchemes = Array(Set(entries.map(\.scheme)).subtracting(Self.convertibleSchemes)).sorted()
+            guard unsupportedSchemes.isEmpty else {
+                throw ConfigError.unsupportedProxySchemes(unsupportedSchemes)
+            }
+            logger.info("Detected proxy URI list, generating runtime YAML config")
+            normalizedContent = try generateConfigFromUriList(entries)
+        case .configFile:
+            logger.info("Subscription content is already a config file")
         }
-        return uriLines.count >= 3
+
+        return normalizedContent
+    }
+
+    private enum SubscriptionContentType {
+        case proxyURIList([ProxyURIEntry])
+        case configFile
+    }
+
+    private struct ProxyURIEntry {
+        let rawValue: String
+        let scheme: String
+    }
+
+    private func classifySubscriptionContent(_ content: String) -> SubscriptionContentType {
+        let lines = content
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+
+        let uriEntries = lines.compactMap(parseProxyURIEntry(from:))
+        if !uriEntries.isEmpty && uriEntries.count == lines.count {
+            return .proxyURIList(uriEntries)
+        }
+
+        return .configFile
+    }
+
+    private func parseProxyURIEntry(from line: String) -> ProxyURIEntry? {
+        guard let separatorRange = line.range(of: "://"),
+              separatorRange.lowerBound != line.startIndex else {
+            return nil
+        }
+
+        let scheme = String(line[..<separatorRange.lowerBound]).lowercased()
+        guard !scheme.isEmpty,
+              scheme.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "+" || $0 == "-" || $0 == "." }) else {
+            return nil
+        }
+
+        return ProxyURIEntry(rawValue: line, scheme: scheme)
     }
 
     /// 从 URI 列表生成完整的配置文件
-    private func generateConfigFromUriList(uriList: String) -> String {
-        let lines = uriList.components(separatedBy: .newlines).filter { !$0.isEmpty }
+    private func generateConfigFromUriList(_ entries: [ProxyURIEntry]) throws -> String {
         var proxiesYaml: [String] = []
         var proxyNames: [String] = []
 
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { continue }
+        for entry in entries {
+            let proxy = try parseProxyURI(entry)
+            proxyNames.append(proxy.name)
+            proxiesYaml.append(proxy.yaml)
+        }
 
-            if let (name, proxyYaml) = parseProxyUri(trimmed) {
-                proxyNames.append(name)
-                proxiesYaml.append(proxyYaml)
-            }
+        guard !proxyNames.isEmpty else {
+            throw ConfigError.emptySubscription
         }
 
         let proxiesSection = proxiesYaml.joined(separator: "\n    ")
-        let proxyNamesList = proxyNames.map { "'\($0)'" }.joined(separator: ", ")
+        let proxyNamesList = proxyNames.map(yamlQuote).joined(separator: ", ")
 
         return """
         \(DefaultRules.baseConfig)
@@ -225,56 +263,29 @@ final class ConfigManager {
     }
 
     /// 解析代理 URI 并返回 (name, yaml) 元组
-    private func parseProxyUri(_ uri: String) -> (name: String, yaml: String)? {
-        guard let (scheme, url) = extractSchemeAndURL(from: uri) else {
-            return nil
+    private func parseProxyURI(_ entry: ProxyURIEntry) throws -> (name: String, yaml: String) {
+        switch entry.scheme {
+        case "anytls":
+            return try parseAnyTLSURI(entry.rawValue)
+        case "ss", "shadowsocks":
+            return try parseShadowsocksURI(entry.rawValue)
+        default:
+            throw ConfigError.unsupportedProxySchemes([entry.scheme])
         }
+    }
 
+    private func parseAnyTLSURI(_ uri: String) throws -> (name: String, yaml: String) {
+        guard let url = URL(string: uri) else {
+            throw ConfigError.invalidProxyURI(uri)
+        }
+        guard let host = url.host, !host.isEmpty else {
+            throw ConfigError.invalidProxyURI(uri)
+        }
         let name = extractProxyName(from: url)
-        let password = extractPassword(from: url, userInfo: url.user ?? "")
-        let host = url.host ?? ""
-        let port = extractPort(from: url, scheme: scheme)
-        let queryParams = extractQueryParameters(from: url)
-        let type = normalizeType(scheme)
-
-        let yaml = generateYaml(for: type, name: name, host: host, port: port, password: password, queryParams: queryParams)
-        return (name, yaml)
-    }
-
-    /// 提取 URL scheme 并验证协议
-    private func extractSchemeAndURL(from uri: String) -> (scheme: String, url: URL)? {
-        guard let url = URL(string: uri),
-              let scheme = url.scheme,
-              Self.supportedSchemes.contains(scheme.lowercased()) else {
-            return nil
+        let password = decodeURIComponent(url.password ?? url.user ?? "")
+        guard !password.isEmpty else {
+            throw ConfigError.invalidProxyURI(uri)
         }
-        return (scheme, url)
-    }
-
-    /// 提取代理名称
-    private func extractProxyName(from url: URL) -> String {
-        var name = url.fragment ?? ""
-        if let data = name.data(using: .utf8),
-           let decoded = try? JSONDecoder().decode(DecodableValue.self, from: data) {
-            name = decoded.value
-        } else if let decoded = name.removingPercentEncoding {
-            name = decoded
-        }
-        return name.isEmpty ? "Unknown" : name
-    }
-
-    /// 提取密码
-    private func extractPassword(from url: URL, userInfo: String) -> String {
-        url.password ?? userInfo
-    }
-
-    /// 提取端口
-    private func extractPort(from url: URL, scheme: String) -> Int {
-        url.port ?? (scheme == "anytls" ? 443 : 80)
-    }
-
-    /// 提取查询参数
-    private func extractQueryParameters(from url: URL) -> (sni: String, insecure: Bool) {
         var sni = ""
         var insecure = false
         let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -288,27 +299,120 @@ final class ConfigManager {
                 break
             }
         }
-        return (sni, insecure)
-    }
 
-    /// 标准化协议类型
-    private func normalizeType(_ scheme: String) -> String {
-        scheme.lowercased() == "shadowsocks" ? "ss" : scheme.lowercased()
-    }
+        var fields = [
+            "name: \(yamlQuote(name))",
+            "type: anytls",
+            "server: \(yamlQuote(host))",
+            "port: \(url.port ?? 443)",
+            "password: \(yamlQuote(password))"
+        ]
 
-    /// 根据协议类型生成 YAML
-    private func generateYaml(for type: String, name: String, host: String, port: Int, password: String, queryParams: (sni: String, insecure: Bool)) -> String {
-        let baseYaml = "- { name: '\(name)', type: \(type), server: \(host), port: \(port), password: \(password), udp: true }"
-
-        switch type {
-        case "ss":
-            return baseYaml.replacingOccurrences(of: "cipher: \(type)", with: "cipher: chacha20-ietf-poly1305")
-        case "anytls":
-            let skipCert = queryParams.insecure ? "true" : "false"
-            return "- { name: '\(name)', type: anytls, server: \(host), port: \(port), password: \(password), sni: \(queryParams.sni), skip-cert-verify: \(skipCert), udp: true }"
-        default:
-            return baseYaml
+        if !sni.isEmpty {
+            fields.append("sni: \(yamlQuote(sni))")
         }
+        fields.append("skip-cert-verify: \(insecure ? "true" : "false")")
+        fields.append("udp: true")
+
+        return (name, "- { \(fields.joined(separator: ", ")) }")
+    }
+
+    private func parseShadowsocksURI(_ uri: String) throws -> (name: String, yaml: String) {
+        guard let entry = parseProxyURIEntry(from: uri),
+              entry.scheme == "ss" || entry.scheme == "shadowsocks" else {
+            throw ConfigError.invalidProxyURI(uri)
+        }
+
+        let contentStart = uri.index(uri.startIndex, offsetBy: entry.scheme.count + 3)
+        let content = String(uri[contentStart...])
+        let parts = content.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        let body = String(parts[0])
+        let name = parts.count > 1 ? decodeURIComponent(String(parts[1])) : "Unknown"
+
+        let bodyParts = body.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        guard bodyParts.count == 1 else {
+            throw ConfigError.invalidProxyURI(uri)
+        }
+
+        let mainPart = String(bodyParts[0])
+        let credentialsAndEndpoint: String
+        if let atIndex = mainPart.lastIndex(of: "@") {
+            let credentialsPart = String(mainPart[..<atIndex])
+            let endpointPart = String(mainPart[mainPart.index(after: atIndex)...])
+            let credentials = try parseShadowsocksCredentials(credentialsPart, rawURI: uri)
+            credentialsAndEndpoint = "\(credentials.cipher):\(credentials.password)@\(endpointPart)"
+        } else {
+            credentialsAndEndpoint = try decodeBase64URLSafe(mainPart, rawURI: uri)
+        }
+
+        guard let atIndex = credentialsAndEndpoint.lastIndex(of: "@") else {
+            throw ConfigError.invalidProxyURI(uri)
+        }
+
+        let credentialsPart = String(credentialsAndEndpoint[..<atIndex])
+        let endpointPart = String(credentialsAndEndpoint[credentialsAndEndpoint.index(after: atIndex)...])
+        let credentials = try parseShadowsocksCredentials(credentialsPart, rawURI: uri)
+        let endpoint = try parseEndpoint(endpointPart, rawURI: uri)
+
+        let proxyName = name.isEmpty ? "Unknown" : name
+        let yaml = "- { name: \(yamlQuote(proxyName)), type: ss, server: \(yamlQuote(endpoint.host)), port: \(endpoint.port), cipher: \(yamlQuote(credentials.cipher)), password: \(yamlQuote(credentials.password)), udp: true }"
+        return (proxyName, yaml)
+    }
+
+    private func parseShadowsocksCredentials(_ value: String, rawURI: String) throws -> (cipher: String, password: String) {
+        let decodedValue = value.contains(":") ? value : try decodeBase64URLSafe(value, rawURI: rawURI)
+        guard let separator = decodedValue.firstIndex(of: ":") else {
+            throw ConfigError.invalidProxyURI(rawURI)
+        }
+
+        let cipher = String(decodedValue[..<separator])
+        let password = String(decodedValue[decodedValue.index(after: separator)...])
+        guard !cipher.isEmpty, !password.isEmpty else {
+            throw ConfigError.invalidProxyURI(rawURI)
+        }
+
+        return (decodeURIComponent(cipher), decodeURIComponent(password))
+    }
+
+    private func parseEndpoint(_ value: String, rawURI: String) throws -> (host: String, port: Int) {
+        guard let components = URLComponents(string: "http://\(value)"),
+              let host = components.host,
+              let port = components.port else {
+            throw ConfigError.invalidProxyURI(rawURI)
+        }
+
+        return (host, port)
+    }
+
+    /// 提取代理名称
+    private func extractProxyName(from url: URL) -> String {
+        let decodedFragment = decodeURIComponent(url.fragment ?? "")
+        return decodedFragment.isEmpty ? "Unknown" : decodedFragment
+    }
+
+    private func decodeURIComponent(_ value: String) -> String {
+        value.removingPercentEncoding ?? value
+    }
+
+    private func yamlQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "''"))'"
+    }
+
+    private func decodeBase64URLSafe(_ value: String, rawURI: String) throws -> String {
+        var normalized = value.replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = normalized.count % 4
+        if remainder != 0 {
+            normalized.append(String(repeating: "=", count: 4 - remainder))
+        }
+
+        guard let data = Data(base64Encoded: normalized, options: .ignoreUnknownCharacters),
+              let decodedString = String(data: data, encoding: .utf8),
+              !decodedString.isEmpty else {
+            throw ConfigError.invalidProxyURI(rawURI)
+        }
+
+        return decodedString
     }
 
     /// Base64 解码
@@ -531,6 +635,8 @@ enum ConfigError: LocalizedError {
     case invalidResponse(statusCode: Int? = nil)
     case emptySubscription
     case subscriptionBlocked
+    case unsupportedProxySchemes([String])
+    case invalidProxyURI(String)
     case networkError(Error)
 
     var errorDescription: String? {
@@ -546,6 +652,10 @@ enum ConfigError: LocalizedError {
             return "订阅内容为空"
         case .subscriptionBlocked:
             return "订阅请求被服务端拦截"
+        case .unsupportedProxySchemes(let schemes):
+            return "当前仅支持自动转换 AnyTLS/SS URI 订阅，暂不支持: \(schemes.joined(separator: ", "))"
+        case .invalidProxyURI:
+            return "订阅中的代理 URI 格式无效或包含暂不支持的参数"
         case .networkError(let error):
             return "网络错误: \(error.localizedDescription)"
         }

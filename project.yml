@@ -41,3 +41,28 @@ targets:
       properties:
         com.apple.security.network.client: true
         com.apple.security.network.server: true
+  iClashTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: iClashTests
+    dependencies:
+      - target: iClash
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.iclash.macos.tests
+        PRODUCT_NAME: iClashTests
+        SWIFT_MODULE_NAME: iClashTests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.9"
+
+schemes:
+  iClash:
+    build:
+      targets:
+        iClash: all
+        iClashTests: [test]
+    test:
+      gatherCoverageData: false
+      targets:
+        - name: iClashTests

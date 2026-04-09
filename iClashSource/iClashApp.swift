@@ -10,6 +10,14 @@ struct iClashApp: App {
         Settings {
             EmptyView()
         }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("订阅设置...") {
+                    NotificationCenter.default.post(name: .openSubscriptionSettings, object: nil)
+                }
+                .keyboardShortcut(",", modifiers: [.command])
+            }
+        }
     }
 }
 
@@ -22,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let configManager = ConfigManager.shared
     private let proxyManager = ProxyManager.shared
     private let logger = Logger(subsystem: "com.iclash.macos", category: "AppDelegate")
+    private let subscriptionSettingsWindowController = SubscriptionSettingsWindowController.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? configManager.ensureBaseConfigurationExists()
@@ -33,40 +42,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSNotification.Name("MihomoStatusChanged"),
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(subscriptionSettingsDidSave(_:)),
+            name: .subscriptionSettingsDidSave,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(openSubscriptionSettingsWindow),
+            name: .openSubscriptionSettings,
+            object: nil
+        )
 
         guard appSettings.hasSubscriptionURL else {
             statusBarController.updateStatusIcon(isRunning: false)
-            showError("""
-            未配置订阅地址。
-
-            请先设置环境变量 ICLASH_SUBSCRIPTION_URL，或在应用中保存订阅地址后再启动。
-            """)
             return
         }
 
-        // 检查配置是否存在，不存在则先下载，然后启动内核、更新状态栏图标、获取内核版本、加载代理列表并更新菜单
         Task {
-            do {
-                if !configManager.runtimeConfigFileExists {
-                    _ = try await configManager.downloadAndValidateConfig(url: configManager.subscriptionURL)
-                }
-                try await mihomoService.start() // 启动内核
-                statusBarController.updateStatusIcon(isRunning: true)
-            } catch {
-                statusBarController.updateStatusIcon(isRunning: false)
-            }
-
-            // 并行获取版本号和代理列表
-            async let version: () = mihomoService.fetchKernelVersion()
-            async let proxies: () = proxyManager.refreshProxyList()
-
-            // 等待两者完成
-            _ = await (version, proxies)
-
-            // 更新菜单
-            if let menu = menuController?.buildMenu() {
-                statusBarController.setMenu(menu)
-            }
+            await startServiceIfConfigured(showErrorAlert: true)
         }
     }
 
@@ -81,6 +76,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusBarController.updateStatusIcon(isRunning: mihomoService.isRunning)
     }
 
+    @objc private func subscriptionSettingsDidSave(_ notification: Notification) {
+        let savedURL = (notification.userInfo?["subscriptionURL"] as? String) ?? appSettings.subscriptionURL
+        Task {
+            await applySubscriptionChange(savedURL, showErrorAlert: true)
+        }
+    }
+
+    @objc private func openSubscriptionSettingsWindow() {
+        subscriptionSettingsWindowController.present()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // 不自动关闭代理，由用户手动控制
     }
@@ -92,6 +98,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .critical
         alert.addButton(withTitle: "确定")
         alert.runModal()
+    }
+
+    private func refreshMenu() {
+        if let menu = menuController?.buildMenu() {
+            statusBarController.setMenu(menu)
+        }
+    }
+
+    private func startServiceIfConfigured(showErrorAlert: Bool) async {
+        await applySubscriptionChange(appSettings.subscriptionURL, showErrorAlert: showErrorAlert)
+    }
+
+    private func applySubscriptionChange(_ subscriptionURL: String, showErrorAlert: Bool) async {
+        let trimmedURL = subscriptionURL.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedURL.isEmpty else {
+            let proxyWasEnabled = mihomoService.isSystemProxyEnabled()
+            if proxyWasEnabled {
+                try? mihomoService.setSystemProxy(enabled: false)
+            }
+            if mihomoService.isRunning {
+                mihomoService.stop()
+            }
+            proxyManager.reset()
+            statusBarController.updateStatusIcon(isRunning: false)
+            refreshMenu()
+            return
+        }
+
+        let proxyWasEnabled = mihomoService.isSystemProxyEnabled()
+        if proxyWasEnabled {
+            try? mihomoService.setSystemProxy(enabled: false)
+        }
+        if mihomoService.isRunning {
+            mihomoService.stop()
+        }
+        proxyManager.reset()
+
+        do {
+            _ = try await configManager.downloadAndValidateConfig(url: trimmedURL)
+            try await mihomoService.start()
+            if proxyWasEnabled {
+                try? mihomoService.setSystemProxy(enabled: true)
+            }
+            statusBarController.updateStatusIcon(isRunning: true)
+
+            async let version: () = mihomoService.fetchKernelVersion()
+            async let proxies: () = proxyManager.refreshProxyList()
+            _ = await (version, proxies)
+        } catch {
+            statusBarController.updateStatusIcon(isRunning: false)
+            if showErrorAlert {
+                showError("启动失败: \(error.localizedDescription)")
+            }
+        }
+
+        refreshMenu()
     }
 }
 
@@ -119,6 +182,10 @@ extension AppDelegate: MenuControllerDelegate {
 
     func toggleProxy() {
         Task {
+            guard appSettings.hasSubscriptionURL else {
+                openSettings()
+                return
+            }
             let isCurrentlyEnabled = mihomoService.isSystemProxyEnabled()
             if isCurrentlyEnabled {
                 // 停止代理：只清除系统代理设置
@@ -133,14 +200,15 @@ extension AppDelegate: MenuControllerDelegate {
         }
     }
 
+    func openSettings() {
+        openSubscriptionSettingsWindow()
+    }
+
     func updateKernel() {
         Task { [weak self] in
-            // 1. 先停止内核
-            self?.mihomoService.stop()
-            try? await Task.sleep(nanoseconds: 1_000_000_000) // 等待进程退出
-
-            // 2. 下载并安装新内核
-            let result = await KernelUpdater.shared.updateKernel()
+            guard let self else { return }
+            let coordinator = KernelUpdateCoordinator(service: self.mihomoService, updater: KernelUpdater.shared)
+            let result = await coordinator.performUpdate()
 
             await MainActor.run {
                 switch result {
@@ -152,23 +220,20 @@ extension AppDelegate: MenuControllerDelegate {
                     alert.addButton(withTitle: "确定")
                     alert.runModal()
 
-                case .updated(let newVersion):
-                    // 3. 启动新内核
-                    Task {
-                        try? await self?.mihomoService.start()
-                        await MainActor.run {
-                            self?.statusBarController.updateStatusIcon(isRunning: self?.mihomoService.isRunning ?? false)
-                            let alert = NSAlert()
-                            alert.messageText = "内核更新成功"
-                            alert.informativeText = "已更新到 v\(newVersion)，已自动启动"
-                            alert.alertStyle = .informational
-                            alert.addButton(withTitle: "确定")
-                            alert.runModal()
-                        }
-                    }
+                case .updated(let newVersion, let restarted):
+                    self.statusBarController.updateStatusIcon(isRunning: self.mihomoService.isRunning)
+                    let alert = NSAlert()
+                    alert.messageText = "内核更新成功"
+                    alert.informativeText = restarted
+                        ? "已更新到 \(newVersion)，已自动重启"
+                        : "已更新到 \(newVersion)"
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "确定")
+                    alert.runModal()
 
                 case .failed(let error):
-                    self?.showError("更新失败: \(error.localizedDescription)")
+                    self.statusBarController.updateStatusIcon(isRunning: self.mihomoService.isRunning)
+                    self.showError("更新失败: \(error.localizedDescription)")
                 }
             }
         }

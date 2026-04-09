@@ -4,7 +4,7 @@
 
 ![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
-![Version](https://img.shields.io/badge/version-v1.0.4-brightgreen)
+![Version](https://img.shields.io/badge/version-v1.0.1-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ## 项目概述
