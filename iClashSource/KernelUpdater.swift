@@ -18,8 +18,8 @@ final class KernelUpdater {
     private let configManager = ConfigManager.shared
     private let mihomoService = MihomoService.shared
 
-    /// GitHub API 获取最新 release (正式版)
-    private let githubAPI = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+    /// GitHub releases 页面
+    private let githubReleasesPage = "https://github.com/MetaCubeX/mihomo/releases"
 
     /// 最新版本
     private(set) var latestVersion: String = ""
@@ -30,48 +30,65 @@ final class KernelUpdater {
 
     private init() {}
 
-    /// 检查更新（获取最新版本号）
+    /// 检查更新（获取最新版本号）- 通过解析 HTML 页面
     func checkForUpdate() async throws -> String {
-        guard let url = URL(string: githubAPI) else {
+        guard let url = URL(string: githubReleasesPage) else {
             throw KernelUpdaterError.invalidURL
         }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.15.3 (KHTML, like Gecko) Version/17.0 Safari/605.15.3", forHTTPHeaderField: "User-Agent")
 
-        let (data, _) = try await URLSession.shared.data(for: request)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let tagName = json["tag_name"] as? String else {
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
             throw KernelUpdaterError.invalidResponse
         }
 
-        let normalizedVersion = tagName.hasPrefix("v") ? tagName : "v\(tagName)"
-        latestVersion = normalizedVersion
-        return normalizedVersion
+        guard let html = String(data: data, encoding: .utf8) else {
+            throw KernelUpdaterError.invalidResponse
+        }
+
+        // 解析最新版本号 - 查找第一个 releases/tag/ 开头的链接
+        let version = try parseLatestVersion(from: html)
+        latestVersion = version
+        return version
     }
 
-    /// 获取下载链接
-    func getDownloadURL(version: String) async throws -> URL {
-        guard let url = URL(string: githubAPI) else {
-            throw KernelUpdaterError.invalidURL
-        }
+    /// 从 HTML 中解析最新版本号
+    func parseLatestVersion(from html: String) throws -> String {
+        // 查找 releases/tag/ 后面的版本号
+        let pattern = #"releases/tag/(v?[\d]+\.[\d]+\.[\d]+)"#
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 30
-
-        let (data, _) = try await URLSession.shared.data(for: request)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let assets = json["assets"] as? [[String: Any]] else {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+              let range = Range(match.range(at: 1), in: html) else {
             throw KernelUpdaterError.invalidResponse
         }
 
-        let versionWithoutV = version.hasPrefix("v") ? String(version.dropFirst()) : version
-        guard let downloadURLString = findAssetURL(in: assets, version: versionWithoutV),
-              let downloadURL = URL(string: downloadURLString) else {
-            throw KernelUpdaterError.downloadURLNotFound
+        var version = String(html[range])
+        if !version.hasPrefix("v") {
+            version = "v\(version)"
+        }
+        return version
+    }
+
+    /// 获取下载链接 - 直接构建 URL
+    func getDownloadURL(version: String) throws -> URL {
+        let versionWithV = version.hasPrefix("v") ? version : "v\(version)"
+        let arch = preferredArchitecture
+
+        // 直接构建下载 URL 格式: /MetaCubeX/mihomo/releases/download/v1.19.24/mihomo-darwin-arm64-v1.19.24.gz
+        let filename = "mihomo-darwin-\(arch)-\(versionWithV).gz"
+        let urlString = "https://github.com/MetaCubeX/mihomo/releases/download/\(versionWithV)/\(filename)"
+
+        guard let url = URL(string: urlString) else {
+            throw KernelUpdaterError.invalidURL
         }
 
-        return downloadURL
+        return url
     }
 
     /// 下载内核到临时目录
@@ -155,7 +172,7 @@ final class KernelUpdater {
                 return .alreadyLatest
             }
 
-            let downloadURL = try await getDownloadURL(version: version)
+            let downloadURL = try getDownloadURL(version: version)
             let downloadedPath = try await downloadKernel(from: downloadURL)
 
             return .ready(newVersion: version, downloadedPath: downloadedPath)
@@ -163,39 +180,6 @@ final class KernelUpdater {
             cleanupTemporaryDownload()
             return .failed(error)
         }
-    }
-
-    /// 在 GitHub assets 中查找匹配的下载链接
-    private func findAssetURL(in assets: [[String: Any]], version: String) -> String? {
-        return findAssetURL(in: assets, version: version, preferredArchitecture: preferredArchitecture)
-    }
-
-    func findAssetURL(in assets: [[String: Any]], version: String, preferredArchitecture: String) -> String? {
-        let arch = preferredArchitecture
-
-        // 优先查找精确版本且不带 go 的当前架构版本
-        for asset in assets {
-            guard let name = asset["name"] as? String,
-                  name.hasPrefix("mihomo-darwin-\(arch)-"),
-                  name.hasSuffix(".gz"),
-                  name == "mihomo-darwin-\(arch)-v\(version).gz",
-                  !name.contains("go") else {
-                continue
-            }
-            return asset["browser_download_url"] as? String
-        }
-
-        // 如果没找到，尝试查找任意匹配的当前架构版本
-        for asset in assets {
-            guard let name = asset["name"] as? String,
-                  name.hasPrefix("mihomo-darwin-\(arch)-"),
-                  name.contains("-\(version).gz") else {
-                continue
-            }
-            return asset["browser_download_url"] as? String
-        }
-
-        return nil
     }
 
     var preferredArchitecture: String {
@@ -225,6 +209,7 @@ final class KernelUpdater {
 enum KernelUpdaterError: LocalizedError {
     case invalidURL
     case invalidResponse
+    case rateLimitExceeded
     case downloadURLNotFound
     case downloadFailed
     case extractFailed
@@ -236,6 +221,8 @@ enum KernelUpdaterError: LocalizedError {
             return "无效的下载地址"
         case .invalidResponse:
             return "无效的服务器响应"
+        case .rateLimitExceeded:
+            return "GitHub API 请求频率超限，请稍后再试"
         case .downloadURLNotFound:
             return "未找到下载链接"
         case .downloadFailed:

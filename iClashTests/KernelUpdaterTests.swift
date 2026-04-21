@@ -11,39 +11,46 @@ final class KernelUpdaterTests: XCTestCase {
         XCTAssertFalse(updater.isCurrentKernelVersion("v1.19.0", matching: "1.19.1"))
     }
 
-    func testFindAssetURLUsesRequestedArchitecture() {
-        let assets: [[String: Any]] = [
-            [
-                "name": "mihomo-darwin-arm64-v1.19.1.gz",
-                "browser_download_url": "https://example.com/arm64"
-            ],
-            [
-                "name": "mihomo-darwin-amd64-v1.19.1.gz",
-                "browser_download_url": "https://example.com/amd64"
-            ]
-        ]
+    func testGetDownloadURLBuildsCorrectURL() {
+        let version = "v1.19.24"
+        let expectedArch = updater.preferredArchitecture
 
-        let arm64URL = updater.findAssetURL(in: assets, version: "1.19.1", preferredArchitecture: "arm64")
-        let amd64URL = updater.findAssetURL(in: assets, version: "1.19.1", preferredArchitecture: "amd64")
+        let url = try? updater.getDownloadURL(version: version)
 
-        XCTAssertEqual(arm64URL, "https://example.com/arm64")
-        XCTAssertEqual(amd64URL, "https://example.com/amd64")
+        XCTAssertNotNil(url)
+        XCTAssertEqual(url?.scheme, "https")
+        XCTAssertEqual(url?.host, "github.com")
+        XCTAssertEqual(url?.absoluteString, "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.24/mihomo-darwin-\(expectedArch)-v1.19.24.gz")
     }
 
-    func testFindAssetURLPrefersExactReleaseOverGoVariant() {
-        let assets: [[String: Any]] = [
-            [
-                "name": "mihomo-darwin-arm64-v1.19.1-go120.gz",
-                "browser_download_url": "https://example.com/go"
-            ],
-            [
-                "name": "mihomo-darwin-arm64-v1.19.1.gz",
-                "browser_download_url": "https://example.com/release"
-            ]
-        ]
+    func testGetDownloadURLHandlesVersionWithoutVPrefix() {
+        let expectedArch = updater.preferredArchitecture
 
-        let selectedURL = updater.findAssetURL(in: assets, version: "1.19.1", preferredArchitecture: "arm64")
+        let url = try? updater.getDownloadURL(version: "1.19.24")
 
-        XCTAssertEqual(selectedURL, "https://example.com/release")
+        XCTAssertNotNil(url)
+        XCTAssertEqual(url?.absoluteString, "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.24/mihomo-darwin-\(expectedArch)-v1.19.24.gz")
+    }
+
+    func testParseLatestVersionFromHTML() throws {
+        let html = #"""
+        <a href="/MetaCubeX/mihomo/releases/tag/v1.19.24">v1.19.24</a>
+        <a href="/MetaCubeX/mihomo/releases/tag/v1.19.23">v1.19.23</a>
+        """#
+
+        let version = try updater.parseLatestVersion(from: html)
+
+        XCTAssertEqual(version, "v1.19.24")
+    }
+
+    func testParseLatestVersionPrefersStableOverPrerelease() throws {
+        let html = #"""
+        <a href="/MetaCubeX/mihomo/releases/tag/Prerelease-Alpha">Prerelease-Alpha</a>
+        <a href="/MetaCubeX/mihomo/releases/tag/v1.19.24">v1.19.24</a>
+        """#
+
+        let version = try updater.parseLatestVersion(from: html)
+
+        XCTAssertEqual(version, "v1.19.24")
     }
 }
