@@ -1,19 +1,20 @@
 name: iClash
 options:
-  bundleIdPrefix: com.iclash
+  bundleIdPrefix: David
   deploymentTarget:
-    macOS: "14.0"
-  xcodeVersion: "15.0"
+    macOS: "26.0"
+  xcodeVersion: "16.0"
   generateEmptyDirectories: true
 
 settings:
   base:
     PRODUCT_NAME: iClash
-    MARKETING_VERSION: "1.0.5"
+    MARKETING_VERSION: "1.0.6"
     CURRENT_PROJECT_VERSION: 1
-    SWIFT_VERSION: "5.9"
-    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_VERSION: "6.2"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
     CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: K9UF7A2D7Y
     ENABLE_HARDENED_RUNTIME: YES
     COMBINE_HIDPI_IMAGES: YES
 
@@ -31,7 +32,7 @@ targets:
         codeSign: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.iclash.macos
+        PRODUCT_BUNDLE_IDENTIFIER: David.iClash
         INFOPLIST_FILE: iClashSource/Supporting/Info.plist
         CODE_SIGN_ENTITLEMENTS: iClash.entitlements
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
@@ -50,11 +51,11 @@ targets:
       - target: iClash
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.iclash.macos.tests
+        PRODUCT_BUNDLE_IDENTIFIER: David.iClashTests
         PRODUCT_NAME: iClashTests
         SWIFT_MODULE_NAME: iClashTests
         GENERATE_INFOPLIST_FILE: YES
-        SWIFT_VERSION: "5.9"
+        SWIFT_VERSION: "6.2"
 
 schemes:
   iClash:
