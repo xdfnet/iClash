@@ -22,9 +22,17 @@ final class SubscriptionSettingsWindowController: NSWindowController {
     }
 
     func present() {
-        window?.contentViewController = NSHostingController(rootView: SubscriptionSettingsView())
+        let dismissAction = { [weak self] in
+            self?.dismiss()
+            return ()
+        }
+        window?.contentViewController = NSHostingController(rootView: SubscriptionSettingsView(onDismiss: dismissAction))
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func dismiss() {
+        window?.close()
     }
 }

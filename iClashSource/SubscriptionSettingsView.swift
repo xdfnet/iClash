@@ -11,6 +11,7 @@ struct SubscriptionSettingsView: View {
     @State private var showAlert = false
 
     private let settings = AppSettings.shared
+    var onDismiss: (() -> Void)?
 
     var body: some View {
         ScrollView {
@@ -75,10 +76,7 @@ struct SubscriptionSettingsView: View {
             userInfo: ["subscriptionURL": trimmedURL]
         )
 
-        alertMessage = trimmedURL.isEmpty
-            ? "订阅地址已清空，服务不会自动启动。"
-            : "订阅地址已保存，应用会立即刷新并尝试启动服务。"
-        showAlert = true
+        onDismiss?()
     }
 
     private func clearSettings() {
