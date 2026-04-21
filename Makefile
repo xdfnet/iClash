@@ -142,6 +142,11 @@ _update_version:
 	sed -i '' "s/MARKETING_VERSION: \"[^\"]*\"/MARKETING_VERSION: \"$$NEW_VERSION\"/g" project.yml; \
 	sed -i '' "s/CURRENT_PROJECT_VERSION: [0-9\"]*/CURRENT_PROJECT_VERSION: 1/g" project.yml; \
 	echo "$(GREEN)project.yml 版本信息已更新$(NC)"
+	@if grep -q "version-" README.md 2>/dev/null; then \
+		echo "$(YELLOW)更新 README.md 版本...$(NC)"; \
+		sed -i '' 's/\(version-v*\)\([0-9.]*\)/\1'$$NEW_VERSION'/' README.md; \
+		echo "$(GREEN)README.md 版本已更新$(NC)"; \
+	fi
 
 push: _require_msg _update_version install package
 	@echo "$(YELLOW)提交并推送...$(NC)"
