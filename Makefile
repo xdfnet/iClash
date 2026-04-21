@@ -140,7 +140,7 @@ _update_version:
 	NEW_VERSION="$$MAJOR.$$MINOR.$$NEW_PATCH"; \
 	echo "$(CYAN)新版本: $$NEW_VERSION$(NC)"; \
 	sed -i '' "s/MARKETING_VERSION: \"[^\"]*\"/MARKETING_VERSION: \"$$NEW_VERSION\"/g" project.yml; \
-	sed -i '' "s/CURRENT_PROJECT_VERSION: [0-9]*/CURRENT_PROJECT_VERSION: 1/g" project.yml; \
+	sed -i '' "s/CURRENT_PROJECT_VERSION: [0-9\"]*/CURRENT_PROJECT_VERSION: 1/g" project.yml; \
 	echo "$(GREEN)project.yml 版本信息已更新$(NC)"
 
 push: _require_msg _update_version install package

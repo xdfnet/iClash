@@ -4,7 +4,7 @@
 
 ![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
-![Version](https://img.shields.io/badge/version-v1.0.1-brightgreen)
+![Version](https://img.shields.io/badge/version-v1.0.2-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ## 项目概述
@@ -145,9 +145,9 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug -destin
 
 ```text
 1. mihomoService.stop()              停止当前内核
-2. KernelUpdater.checkForUpdate()    检查最新稳定版
-3. KernelUpdater.getDownloadURL()    获取下载地址
-4. KernelUpdater.downloadKernel()    下载新内核
+2. KernelUpdater.checkForUpdate()    解析 GitHub 页面获取最新稳定版
+3. KernelUpdater.getDownloadURL()     直接构建下载地址
+4. KernelUpdater.downloadKernel()     下载新内核
 5. KernelUpdater.installKernel()     替换内置二进制
 6. mihomoService.start()             重新启动内核
 ```
