@@ -144,7 +144,7 @@ _update_version:
 	echo "$(GREEN)project.yml 版本信息已更新$(NC)"
 	@if grep -q "version-" README.md 2>/dev/null; then \
 		echo "$(YELLOW)更新 README.md 版本...$(NC)"; \
-		sed -i '' 's/\(version-v*\)\([0-9.]*\)/\1'$$NEW_VERSION'/' README.md; \
+		sed -i "" "s/version-[0-9.]*/version-$$NEW_VERSION/g" README.md; \
 		echo "$(GREEN)README.md 版本已更新$(NC)"; \
 	fi
 
