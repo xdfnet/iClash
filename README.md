@@ -2,10 +2,10 @@
 
 基于 Mihomo 内核的 macOS 菜单栏代理客户端。
 
-![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue)
-![Swift](https://img.shields.io/badge/Swift-5.9-orange)
-![Version](https://img.shields.io/badge/version-v-brightgreen)
-![License](https://img.shields.io/badge/License-MIT-green)
+[![Version](https://img.shields.io/github/v/release/xdfnet/iClash?style=flat-square)](https://github.com/xdfnet/iClash/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-15.0+-green.svg)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-6.2+-orange.svg)](https://swift.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## 项目概述
 
