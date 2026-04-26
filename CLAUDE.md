@@ -22,7 +22,7 @@ make push MSG="提交信息"
 
 | 配置项 | 值 |
 |--------|-----|
-| 最低 macOS | 26.0 |
+| 最低 macOS | 15.0 |
 | Swift 版本 | 6.2 |
 | Xcode 版本 | 16.0 |
 | Bundle ID | David.iClash |
