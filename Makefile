@@ -93,9 +93,13 @@ install:
 	@rm -rf $(BUILD_DIR)
 	@rm -rf $(DERIVED_DATA_DIR)/$(PROJECT_NAME)-*
 	@echo "$(GREEN)清理完成$(NC)"
-	@echo "$(YELLOW)4. 生成 Xcode 工程...$(NC)"
-	@xcodegen generate
-	@echo "$(GREEN)Xcode 工程已生成$(NC)"
+	@if [ -f project.yml ]; then \
+		echo "$(YELLOW)4. 生成 Xcode 工程...$(NC)"; \
+		xcodegen generate; \
+		echo "$(GREEN)Xcode 工程已生成$(NC)"; \
+	else \
+		echo "$(YELLOW)4. 使用已有 Xcode 工程$(NC)"; \
+	fi
 	@echo "$(YELLOW)5. 构建 Release 版本...$(NC)"
 	@BUILD_NUMBER=$$(date +%Y%m%d%H%M%S); \
 	xcodebuild \
@@ -126,10 +130,10 @@ _require_msg:
 	fi
 
 _update_version:
-	@echo "$(YELLOW)更新 project.yml 版本信息...$(NC)"
-	@CURRENT_VERSION=$$(grep "MARKETING_VERSION:" project.yml | head -1 | awk '{print $$2}' | tr -d '"'); \
+	@echo "$(YELLOW)递增版本号...$(NC)"
+	@CURRENT_VERSION=$$(grep "MARKETING_VERSION = " iClash.xcodeproj/project.pbxproj | head -1 | sed 's/.*MARKETING_VERSION = \([0-9.]*\).*/\1/'); \
 	if [ -z "$$CURRENT_VERSION" ]; then \
-		echo "$(RED)错误: 无法从 project.yml 获取当前版本$(NC)"; \
+		echo "$(RED)错误: 无法从 project.pbxproj 获取当前版本$(NC)"; \
 		exit 1; \
 	fi; \
 	echo "$(CYAN)当前版本: $$CURRENT_VERSION$(NC)"; \
@@ -139,22 +143,30 @@ _update_version:
 	NEW_PATCH=$$((PATCH + 1)); \
 	NEW_VERSION="$$MAJOR.$$MINOR.$$NEW_PATCH"; \
 	echo "$(CYAN)新版本: $$NEW_VERSION$(NC)"; \
-	sed -i '' "s/MARKETING_VERSION: \"[^\"]*\"/MARKETING_VERSION: \"$$NEW_VERSION\"/g" project.yml; \
-	sed -i '' "s/CURRENT_PROJECT_VERSION: [0-9\"]*/CURRENT_PROJECT_VERSION: 1/g" project.yml; \
-	echo "$(GREEN)project.yml 版本信息已更新$(NC)"
-	@if grep -q "version-" README.md 2>/dev/null; then \
-		echo "$(YELLOW)更新 README.md 版本...$(NC)"; \
-		sed -i "" "s/version-[0-9.]*/version-$$NEW_VERSION/g" README.md; \
-		echo "$(GREEN)README.md 版本已更新$(NC)"; \
+	sed -i '' "s/MARKETING_VERSION = [0-9.]*/MARKETING_VERSION = $$NEW_VERSION/g" iClash.xcodeproj/project.pbxproj; \
+	sed -i '' "s/CURRENT_PROJECT_VERSION = [0-9]*/CURRENT_PROJECT_VERSION = 1/g" iClash.xcodeproj/project.pbxproj; \
+	echo "$(GREEN)project.pbxproj 版本已更新$(NC)"; \
+	if grep -q "github.com/xdfnet/iClash/releases" README.md 2>/dev/null; then \
+		echo "$(YELLOW)更新 README.md release URL...$(NC)"; \
+		sed -i "" "s|github.com/xdfnet/iClash/releases/tag/[^)]*|github.com/xdfnet/iClash/releases/tag/v$$NEW_VERSION|g" README.md; \
+		echo "$(GREEN)README.md 已更新$(NC)"; \
 	fi
 
 push: _require_msg _update_version install package
 	@echo "$(YELLOW)提交并推送...$(NC)"
-	@git add .
-	@git commit -m "$(MSG)"
-	@echo "$(GREEN)提交完成: $(MSG)$(NC)"
-	@git push
-	@echo "$(GREEN)推送完成$(NC)"
+	@if git diff --quiet && git diff --cached --quiet; then \
+		echo "$(CYAN)没有变更需要提交$(NC)"; \
+	else \
+		git add .; \
+		git commit -m "$(MSG)"; \
+		echo "$(GREEN)提交完成: $(MSG)$(NC)"; \
+		git push; \
+		echo "$(GREEN)推送完成$(NC)"; \
+	fi
+	@echo "$(YELLOW)创建 GitHub Release...$(NC)"
+	@VERSION=$$(grep "MARKETING_VERSION = " iClash.xcodeproj/project.pbxproj | head -1 | sed 's/.*MARKETING_VERSION = \([0-9.]*\).*/\1/'); \
+	gh release create "v$$VERSION" --title "iClash v$$VERSION" --notes "$(MSG)"; \
+	echo "$(GREEN)Release 创建完成: https://github.com/xdfnet/iClash/releases/tag/v$$VERSION$(NC)"
 
 package:
 	@echo "$(BLUE)打包 Release 为 zip...$(NC)"
