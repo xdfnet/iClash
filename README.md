@@ -52,17 +52,7 @@ xcodegen generate
 
 ### 4. 配置订阅地址
 
-首次启动后通过菜单栏 `iClash → 订阅设置` 填入订阅地址，或直接编辑配置文件：
-
-```bash
-open ~/.config/iclash/config.json
-```
-
-```json
-{
-  "subscriptionURL": "https://your-subscription-url"
-}
-```
+通过菜单栏 `iClash → 订阅设置` 填入订阅地址，保存在系统 `UserDefaults` 中。
 
 ### 5. 构建与运行
 
@@ -80,15 +70,7 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug -destin
 
 ## 配置
 
-`~/.config/iclash/config.json`：
-
-```json
-{
-  "subscriptionURL": "https://your-subscription-url"
-}
-```
-
-配置文件优先于应用内保存的设置。首次启动会自动创建配置目录。
+订阅地址通过菜单栏 `iClash → 订阅设置` 修改，存储在 `UserDefaults` 中。无需手动编辑配置文件。
 
 ## 订阅
 
