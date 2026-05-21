@@ -52,21 +52,17 @@ xcodegen generate
 
 ### 4. 配置订阅地址
 
-应用优先从系统环境变量 `ICLASH_SUBSCRIPTION_URL` 读取订阅地址。
-
-终端启动场景：
+首次启动后通过菜单栏 `iClash → 订阅设置` 填入订阅地址，或直接编辑配置文件：
 
 ```bash
-export ICLASH_SUBSCRIPTION_URL="https://your-subscription-url"
+open ~/.config/iclash/config.json
 ```
 
-Finder 或 Xcode 启动 GUI 应用场景：
-
-```bash
-launchctl setenv ICLASH_SUBSCRIPTION_URL "https://your-subscription-url"
+```json
+{
+  "subscriptionURL": "https://your-subscription-url"
+}
 ```
-
-如果未设置环境变量，应用会回退到本地保存的订阅地址（`UserDefaults`）。
 
 ### 5. 构建与运行
 
@@ -82,7 +78,19 @@ make debug
 xcodebuild -project iClash.xcodeproj -scheme iClash -configuration Debug -destination 'platform=macOS' build
 ```
 
-## 配置与订阅
+## 配置
+
+`~/.config/iclash/config.json`：
+
+```json
+{
+  "subscriptionURL": "https://your-subscription-url"
+}
+```
+
+配置文件优先于应用内保存的设置。首次启动会自动创建配置目录。
+
+## 订阅
 
 订阅内容下载后会自动识别并处理以下格式：
 
