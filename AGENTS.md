@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## 项目概述
 
@@ -62,7 +62,7 @@ make push MSG="提交信息"
 ### 环境变量
 
 ```bash
-export ~/.config/iclash/config.json="your-subscription-url"
+export ICLASH_SUBSCRIPTION_URL="your-subscription-url"
 ```
 
 ### 订阅格式
