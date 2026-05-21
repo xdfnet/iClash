@@ -59,22 +59,32 @@ make push MSG="提交信息"
 
 ## 配置
 
-### 环境变量
+订阅地址通过菜单栏 `iClash → 订阅设置` 输入，保存在系统原生 `UserDefaults` 中。
 
-```bash
-export ~/.config/iclash/config.json="your-subscription-url"
-```
-
-### 订阅格式
+无需环境变量或手动编辑配置文件。
 
 支持以下订阅格式：
 - Base64 编码
-- URI 列表
+- URI 列表（AnyTLS / SS / VMess / VLESS / Trojan / Hysteria / TUIC / WireGuard）
 - YAML 配置
+
+## 数据存储
+
+```
+~/.config/iclash/
+├── config.yaml       # 运行时生成的 mihomo 配置
+├── run               # 内核运行时文件
+└── Country.mmdb      # GeoIP 数据库
+```
+
+```
+~/Library/Preferences/David.iClash.plist   # UserDefaults（订阅地址）
+```
 
 ## 技术特点
 
-- 纯菜单栏应用（`LSUIElement = true`）
+- 纯菜单栏应用（`LSUIElement = true`），不占 Dock 图标
 - 内置 Mihomo 二进制，无需额外安装
 - 内核运行状态与系统代理开关解耦
+- 订阅内容自动识别格式，URI 列表自动生成运行时 YAML
 - 自动生成代理组和规则配置
