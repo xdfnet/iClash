@@ -32,25 +32,39 @@ final class KernelUpdaterTests: XCTestCase {
         XCTAssertEqual(url?.absoluteString, "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.24/mihomo-darwin-\(expectedArch)-v1.19.24.gz")
     }
 
-    func testParseLatestVersionFromHTML() throws {
-        let html = #"""
-        <a href="/MetaCubeX/mihomo/releases/tag/v1.19.24">v1.19.24</a>
-        <a href="/MetaCubeX/mihomo/releases/tag/v1.19.23">v1.19.23</a>
+    func testGitHubReleaseModelDecoding() throws {
+        let json = #"""
+        {
+            "tag_name": "v1.19.26",
+            "assets": [
+                {
+                    "name": "mihomo-darwin-arm64-v1.19.26.gz",
+                    "browser_download_url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.26/mihomo-darwin-arm64-v1.19.26.gz"
+                }
+            ]
+        }
         """#
 
-        let version = try updater.parseLatestVersion(from: html)
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
 
-        XCTAssertEqual(version, "v1.19.24")
+        XCTAssertEqual(release.tagName, "v1.19.26")
+        XCTAssertEqual(release.assets?.count, 1)
+        XCTAssertEqual(release.assets?.first?.name, "mihomo-darwin-arm64-v1.19.26.gz")
+        XCTAssertEqual(release.assets?.first?.browserDownloadURL, "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.26/mihomo-darwin-arm64-v1.19.26.gz")
     }
 
-    func testParseLatestVersionPrefersStableOverPrerelease() throws {
-        let html = #"""
-        <a href="/MetaCubeX/mihomo/releases/tag/Prerelease-Alpha">Prerelease-Alpha</a>
-        <a href="/MetaCubeX/mihomo/releases/tag/v1.19.24">v1.19.24</a>
+    func testGitHubReleaseModelDecodingWithoutAssets() throws {
+        let json = #"""
+        {
+            "tag_name": "v1.19.26"
+        }
         """#
 
-        let version = try updater.parseLatestVersion(from: html)
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
 
-        XCTAssertEqual(version, "v1.19.24")
+        XCTAssertEqual(release.tagName, "v1.19.26")
+        XCTAssertNil(release.assets)
     }
 }

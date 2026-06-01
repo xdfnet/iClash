@@ -1,7 +1,7 @@
 # iClash Makefile
 # 用于构建 macOS 应用程序
 
-.PHONY: help debug install push package _update_version _require_msg
+.PHONY: help debug install uninstall push package _update_version _require_msg
 
 # =============================================================================
 # 项目配置
@@ -40,6 +40,7 @@ help:
 	@echo "$(GREEN)核心命令:$(NC)"
 	@echo "  $(YELLOW)debug$(NC)       - 构建并运行 Debug 版本"
 	@echo "  $(YELLOW)install$(NC)      - 构建并安装 Release 版本 (不提交)"
+	@echo "  $(YELLOW)uninstall$(NC)    - 卸载应用及运行时数据"
 	@echo "  $(YELLOW)package$(NC)      - 打包 Release 为 zip (依赖 install)"
 	@echo "  $(YELLOW)push$(NC)        - 构建、安装、打包、更新版本并推送 (需要 MSG=\"提交信息\")"
 	@echo ""
@@ -112,6 +113,29 @@ install:
 		exit 1; \
 	fi
 
+uninstall:
+	@echo "$(BLUE)卸载 iClash...$(NC)"
+	@echo "$(YELLOW)1. 停止运行中的应用...$(NC)"
+	@pkill -f "$(PROJECT_NAME)" 2>/dev/null || true
+	@echo "$(YELLOW)2. 移除应用...$(NC)"
+	@rm -rf "$(INSTALL_DIR)/$(PROJECT_NAME).app" 2>/dev/null || true
+	@echo "$(GREEN)应用已移除$(NC)"
+	@echo "$(YELLOW)3. 移除运行时配置...$(NC)"
+	@CONFIG_DIR="$$HOME/.config/iclash"; \
+	if [ -d "$$CONFIG_DIR" ]; then \
+		rm -rf "$$CONFIG_DIR"; \
+		echo "$(GREEN)已删除: $$CONFIG_DIR$(NC)"; \
+	fi
+	@echo "$(YELLOW)4. 移除偏好设置...$(NC)"
+	@defaults delete David.iClash 2>/dev/null || true
+	@echo "$(GREEN)偏好设置已清除$(NC)"
+	@echo "$(YELLOW)5. 清理构建文件...$(NC)"
+	@rm -rf $(BUILD_DIR)
+	@rm -rf $(DERIVED_DATA_DIR)/$(PROJECT_NAME)-*
+	@echo "$(GREEN)构建文件已清理$(NC)"
+	@echo ""
+	@echo "$(GREEN)✅ iClash 已完全卸载$(NC)"
+
 _require_msg:
 	@if [ -z "$(MSG)" ]; then \
 		echo "$(RED)错误: 请提供提交信息$(NC)"; \
@@ -121,7 +145,8 @@ _require_msg:
 
 _update_version:
 	@echo "$(YELLOW)递增版本号...$(NC)"
-	@CURRENT_VERSION=$$(grep "MARKETING_VERSION = " iClash.xcodeproj/project.pbxproj | head -1 | sed 's/.*MARKETING_VERSION = \([0-9.]*\).*/\1/'); \
+	@PBXPROJ="iClash.xcodeproj/project.pbxproj"; \
+	CURRENT_VERSION=$$(grep -A1 'MARKETING_VERSION' "$$PBXPROJ" | grep '<string>' | head -1 | sed 's/.*<string>\([0-9.]*\)<\/string>.*/\1/'); \
 	if [ -z "$$CURRENT_VERSION" ]; then \
 		echo "$(RED)错误: 无法从 project.pbxproj 获取当前版本$(NC)"; \
 		exit 1; \
@@ -133,9 +158,9 @@ _update_version:
 	NEW_PATCH=$$((PATCH + 1)); \
 	NEW_VERSION="$$MAJOR.$$MINOR.$$NEW_PATCH"; \
 	echo "$(CYAN)新版本: $$NEW_VERSION$(NC)"; \
-	sed -i '' "s/MARKETING_VERSION = [0-9.]*/MARKETING_VERSION = $$NEW_VERSION/g" iClash.xcodeproj/project.pbxproj; \
-	sed -i '' "s/CURRENT_PROJECT_VERSION = [0-9]*/CURRENT_PROJECT_VERSION = 1/g" iClash.xcodeproj/project.pbxproj; \
-	echo "$(GREEN)project.pbxproj 版本已更新$(NC)"; \
+	sed -i '' "s|<string>$$CURRENT_VERSION<\/string>|<string>$$NEW_VERSION<\/string>|g" "$$PBXPROJ"; \
+	sed -i '' "s|<string>1<\/string>|<string>1<\/string>|g" "$$PBXPROJ"; \
+	echo "$(GREEN)project.pbxproj 版本已更新: $$CURRENT_VERSION → $$NEW_VERSION$(NC)"; \
 	if grep -q "github.com/xdfnet/iClash/releases" README.md 2>/dev/null; then \
 		echo "$(YELLOW)更新 README.md release URL...$(NC)"; \
 		sed -i "" "s|github.com/xdfnet/iClash/releases/tag/[^)]*|github.com/xdfnet/iClash/releases/tag/v$$NEW_VERSION|g" README.md; \
@@ -154,7 +179,7 @@ push: _require_msg _update_version install package
 		echo "$(GREEN)推送完成$(NC)"; \
 	fi
 	@echo "$(YELLOW)创建 GitHub Release...$(NC)"
-	@VERSION=$$(grep "MARKETING_VERSION = " iClash.xcodeproj/project.pbxproj | head -1 | sed 's/.*MARKETING_VERSION = \([0-9.]*\).*/\1/'); \
+	@VERSION=$$(grep -A1 'MARKETING_VERSION' iClash.xcodeproj/project.pbxproj | grep '<string>' | head -1 | sed 's/.*<string>\([0-9.]*\)<\/string>.*/\1/'); \
 	ZIP_PATH=$$(find $(PACKAGE_DIR) -name "$(PROJECT_NAME)-$$VERSION-*.zip" -type f | head -1); \
 	gh release create "v$$VERSION" --title "iClash v$$VERSION" --notes "$(MSG)"; \
 	if [ -n "$$ZIP_PATH" ]; then \
@@ -171,7 +196,7 @@ package:
 		echo "$(RED)错误: 找不到构建的应用程序$(NC)"; \
 		exit 1; \
 	fi; \
-	version=$$(grep "MARKETING_VERSION = " iClash.xcodeproj/project.pbxproj | head -1 | sed 's/.*MARKETING_VERSION = \([0-9.]*\).*/\1/'); \
+	version=$$(grep -A1 'MARKETING_VERSION' iClash.xcodeproj/project.pbxproj | grep '<string>' | head -1 | sed 's/.*<string>\([0-9.]*\)<\/string>.*/\1/'); \
 	build=$$(plutil -extract CFBundleVersion raw "$$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "0"); \
 	zip_path="$(PACKAGE_DIR)/$(PROJECT_NAME)-$$version-$$build.zip"; \
 	rm -f "$$zip_path"; \
