@@ -275,28 +275,42 @@ final class ConfigManager {
     }
 
     private func parseAnyTLSURI(_ uri: String) throws -> (name: String, yaml: String) {
-        guard let url = URL(string: uri) else {
+        // 手动解析 URI，避免 URL 组件对密码中特殊字符的截断问题
+        let (passwordPart, hostPart, fragment) = try parseAnyTLSURIRaw(uri)
+
+        let host = hostPart.host
+        guard !host.isEmpty else {
             throw ConfigError.invalidProxyURI(uri)
         }
-        guard let host = url.host, !host.isEmpty else {
-            throw ConfigError.invalidProxyURI(uri)
-        }
-        let name = extractProxyName(from: url)
-        let password = decodeURIComponent(url.password ?? url.user ?? "")
+
+        let name = fragment.isEmpty ? "Unknown" : decodeURIComponent(fragment)
+        let password = decodeURIComponent(passwordPart)
         guard !password.isEmpty else {
             throw ConfigError.invalidProxyURI(uri)
         }
+
+        let port = hostPart.port
         var sni = ""
         var insecure = false
-        let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        for item in queryItems {
-            switch item.name.lowercased() {
-            case "sni":
-                sni = item.value ?? ""
-            case "insecure":
-                insecure = item.value == "1" || item.value == "true"
-            default:
-                break
+        var flow = ""
+        var udp: Bool?
+
+        if let queryItems = hostPart.queryItems {
+            for item in queryItems {
+                switch item.name.lowercased() {
+                case "sni":
+                    sni = item.value ?? ""
+                case "insecure":
+                    insecure = item.value == "1" || item.value == "true" || item.value == "yes"
+                case "flow":
+                    flow = item.value ?? ""
+                case "udp":
+                    if let val = item.value?.lowercased() {
+                        udp = (val == "1" || val == "true" || val == "yes")
+                    }
+                default:
+                    break
+                }
             }
         }
 
@@ -304,17 +318,65 @@ final class ConfigManager {
             "name: \(yamlQuote(name))",
             "type: anytls",
             "server: \(yamlQuote(host))",
-            "port: \(url.port ?? 443)",
+            "port: \(port)",
             "password: \(yamlQuote(password))"
         ]
 
         if !sni.isEmpty {
             fields.append("sni: \(yamlQuote(sni))")
         }
+        if !flow.isEmpty {
+            fields.append("flow: \(yamlQuote(flow))")
+        }
         fields.append("skip-cert-verify: \(insecure ? "true" : "false")")
-        fields.append("udp: true")
+        fields.append("udp: \(udp ?? true)")
 
         return (name, "- { \(fields.joined(separator: ", ")) }")
+    }
+
+    /// 手动解析 AnyTLS URI 的各个部分，避免 URL 组件对特殊字符的处理差异
+    /// 格式: anytls://password@host:port?params#fragment
+    private func parseAnyTLSURIRaw(_ uri: String) throws -> (password: String, host: HostPortQuery, fragment: String) {
+        // 去掉 scheme
+        let schemeSuffix = "://"
+        guard let schemeEnd = uri.range(of: schemeSuffix) else {
+            throw ConfigError.invalidProxyURI(uri)
+        }
+        let remainder = String(uri[schemeEnd.upperBound...])
+
+        // 分离 fragment (#)
+        let (withoutFragment, fragment) = {
+            if let hashIndex = remainder.firstIndex(of: "#") {
+                return (String(remainder[..<hashIndex]), String(remainder[hashIndex...].dropFirst()))
+            }
+            return (remainder, "")
+        }()
+
+        // 分离 password@ 部分: 找第一个 @ 前面的就是 password
+        guard let atIndex = withoutFragment.firstIndex(of: "@") else {
+            throw ConfigError.invalidProxyURI(uri)
+        }
+        let password = String(withoutFragment[..<atIndex])
+        let hostQueryPart = String(withoutFragment[withoutFragment.index(after: atIndex)...])
+
+        // 用 URLComponents 解析 host:port?query
+        let reconstructed = "anytls://\(hostQueryPart)"
+        guard let components = URLComponents(string: reconstructed),
+              let host = components.host,
+              !host.isEmpty else {
+            throw ConfigError.invalidProxyURI(uri)
+        }
+
+        let port = components.port ?? 443
+        let queryItems = components.queryItems
+
+        return (password, HostPortQuery(host: host, port: port, queryItems: queryItems), fragment)
+    }
+
+    private struct HostPortQuery {
+        let host: String
+        let port: Int
+        let queryItems: [URLQueryItem]?
     }
 
     private func parseShadowsocksURI(_ uri: String) throws -> (name: String, yaml: String) {
@@ -620,14 +682,6 @@ final class ConfigManager {
         return result
     }
 
-    /// 用于 URL 解码的辅助类型
-    private struct DecodableValue: Decodable {
-        let value: String
-        init(from decoder: Decoder) throws {
-            let container = try decoder.singleValueContainer()
-            value = try container.decode(String.self)
-        }
-    }
 }
 
 enum ConfigError: LocalizedError {

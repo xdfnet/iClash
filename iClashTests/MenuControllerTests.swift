@@ -9,7 +9,9 @@ final class MenuControllerTests: XCTestCase {
     override func setUp() {
         super.setUp()
         fakeDelegate = FakeMenuControllerDelegate()
-        menuController = MenuController(delegate: fakeDelegate)
+        let state = AppState()
+        let coordinator = AppCoordinator(mihomo: FakeKernelService(isRunning: false, proxyEnabled: false), config: FakeConfigManager(), proxy: FakeProxyManager(), settings: FakeAppSettings(), appState: state)
+        menuController = MenuController(delegate: fakeDelegate, coordinator: coordinator, appState: state)
     }
 
     func testBuildMenu_createsAllItems() {
@@ -126,5 +128,13 @@ private final class FakeMenuControllerDelegate: MenuControllerDelegate {
 
     func quitApp() {
         quitAppCallCount += 1
+    }
+
+    func fetchLatestVersion() async -> String {
+        return "v1.19.26"
+    }
+
+    func canOfferUpdate() async -> Bool {
+        return false
     }
 }
