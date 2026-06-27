@@ -31,12 +31,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appState = AppState.shared
     private let coordinator = AppCoordinator.shared
     private let mihomoService = MihomoService.shared
-    private let configManager = ConfigManager.shared
     private let appSettings = AppSettings.shared
-    private let logger = Logger(subsystem: "com.iclash.macos", category: "AppDelegate")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        try? configManager.ensureBaseConfigurationExists()
         setupStatusBar()
         setupMenu()
 
@@ -50,6 +47,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(openSubscriptionSettingsWindow),
             name: .openSubscriptionSettings,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMihomoCrashed),
+            name: .mihomoCrashed,
             object: nil
         )
 
@@ -131,13 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SubscriptionSettingsWindow.shared.present()
     }
 
-    private func showInfo(title: String, message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "确定")
-        alert.runModal()
+    @objc private func handleMihomoCrashed() {
+        showError("Mihomo 内核意外崩溃，系统代理已自动关闭")
     }
 }
 
@@ -145,14 +143,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: MenuControllerDelegate {
     func menuWillOpen() {
+        appState.isProxyEnabled = mihomoService.isSystemProxyEnabled()
+        appState.isRunning = mihomoService.isRunning
         rebuildMenu()
+        // 后台刷新代理列表，下次打开菜单时生效
+        Task { await coordinator.refreshProxies() }
     }
 
     func selectProxy(name: String, in group: String) {
-        Task {
-            await coordinator.selectProxy(name: name, in: group)
-            self.rebuildMenu()
-        }
+        // 菜单已关闭，无需重建
+        Task { await coordinator.selectProxy(name: name, in: group) }
     }
 
     func toggleProxy() {
@@ -164,42 +164,8 @@ extension AppDelegate: MenuControllerDelegate {
         openSubscriptionSettingsWindow()
     }
 
-    func updateKernel() {
-        Task { [weak self] in
-            guard let self else { return }
-            let result = await self.coordinator.updateKernel()
-
-            await MainActor.run {
-                switch result {
-                case .alreadyLatest:
-                    self.showInfo(title: "内核更新", message: "当前已是最新稳定版")
-
-                case .updated(let newVersion, let restarted):
-                    let msg = restarted
-                        ? "已更新到 \(newVersion)，已自动重启"
-                        : "已更新到 \(newVersion)"
-                    self.showInfo(title: "内核更新成功", message: msg)
-
-                case .failed(let error):
-                    self.showError("更新失败: \(error.localizedDescription)")
-                }
-            }
-            self.syncUI()
-        }
-    }
-
     func quitApp() {
         coordinator.prepareForQuit()
         NSApplication.shared.terminate(nil)
-    }
-
-    func fetchLatestVersion() async -> String {
-        await coordinator.fetchLatestVersion()
-    }
-
-    func canOfferUpdate() async -> Bool {
-        let latest = await coordinator.fetchLatestVersion()
-        guard latest != "获取失败" else { return false }
-        return !KernelUpdater.shared.isCurrentKernelVersion(appState.kernelVersion, matching: latest)
     }
 }

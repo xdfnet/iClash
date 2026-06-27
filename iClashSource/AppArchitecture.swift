@@ -21,10 +21,7 @@ final class AppState {
     var isLoadingProxies = false
 
     // MARK: 错误
-    var lastError: String? {
-        didSet { if lastError != nil { errorCount += 1 } }
-    }
-    private(set) var errorCount = 0
+    var lastError: String?
 
     // MARK: 订阅
     var hasSubscriptionURL = false
@@ -186,57 +183,6 @@ final class AppCoordinator {
         appState.proxyGroups = proxy.proxyGroups
         appState.currentSelections = proxy.currentSelections
         appState.isLoadingProxies = proxy.isLoadingProxies
-    }
-
-    // MARK: - 内核更新
-
-    func updateKernel() async -> KernelUpdateFlowResult {
-        let wasRunning = mihomo.isRunning
-        let wasProxyEnabled = mihomo.isSystemProxyEnabled()
-        let result = await KernelUpdater.shared.updateKernel()
-
-        switch result {
-        case .alreadyLatest:
-            return .alreadyLatest
-
-        case .failed(let error):
-            appState.lastError = "内核更新失败: \(error.localizedDescription)"
-            return .failed(error)
-
-        case .ready(let newVersion, let downloadedPath):
-            do {
-                if wasRunning {
-                    mihomo.stop()
-                }
-                try KernelUpdater.shared.installKernel(from: downloadedPath)
-                mihomo.updateKernelVersion(newVersion)
-
-                if wasRunning {
-                    try await mihomo.start()
-                    if wasProxyEnabled {
-                        try mihomo.setSystemProxy(enabled: true)
-                    }
-                    await mihomo.fetchKernelVersion()
-                }
-
-                appState.syncFromServices(mihomo: mihomo, proxy: proxy)
-                return .updated(version: newVersion, restarted: wasRunning)
-            } catch {
-                KernelUpdater.shared.cleanupTemporaryDownload()
-                if wasRunning {
-                    try? await mihomo.start()
-                    if wasProxyEnabled {
-                        safelySetProxy(enabled: true)
-                    }
-                }
-                appState.lastError = "内核更新失败: \(error.localizedDescription)"
-                return .failed(error)
-            }
-        }
-    }
-
-    func fetchLatestVersion() async -> String {
-        (try? await KernelUpdater.shared.checkForUpdate()) ?? "获取失败"
     }
 
     // MARK: - 退出

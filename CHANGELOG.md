@@ -2,7 +2,15 @@
 
 > iClash — 基于 Mihomo 内核的 macOS 菜单栏代理客户端。Swift 开发，支持多种代理协议和订阅格式。
 
-## 0.5.0 — 2026-06-23
+## 1.6.0 — 2026-06-27
+- **Simplify**: Remove KernelUpdater, kernel auto-update, rely on app releases for resource updates
+- **Crash detection**: Post user notification when mihomo kernel crashes unexpectedly, auto-clean system proxy
+- **Menu sync**: Real-time proxy / kernel state check on each menu open; display errors at menu bottom, auto-clear on close
+- **Subscription UI**: Minimal input field + save button, widened window 600px
+- **Performance**: Fix double subscription download on startup
+- **Resources**: Refresh Country.mmdb to Loyalsoldier/geoip `202606250051`
+- **Scripts**: Add `scripts/update-resources.sh` for one-click mihomo + mmdb update
+- **Docs**: Add ARCHITECTURE.md, overhaul README, update upgrade-resources.md
 - Upgrade bundled Mihomo kernel to v1.19.27 (was v1.19.26) — 修复 quic sniffer / trojan / socks4 / vision TLS filter 等多个崩溃级 Bug；新增 anytls/trojan/vless 监听器 `allow-insecure` 配置
 - Refresh Country.mmdb to Loyalsoldier/geoip `202606182327` (5.79 MB → 8.36 MB)，提升 GeoIP 匹配精度
 

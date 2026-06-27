@@ -53,16 +53,17 @@ final class MenuController: NSObject, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // ── 版本信息 ──
-        let infoItem = NSMenuItem(title: "软件版本", action: #selector(showKernelInfo), keyEquivalent: "")
-        infoItem.target = self
-        if let img = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Kernel") {
-            img.isTemplate = true
-            infoItem.image = img
+        // ── 错误信息 ──
+        if let error = appState.lastError {
+            let errorItem = NSMenuItem(title: error, action: nil, keyEquivalent: "")
+            errorItem.isEnabled = false
+            if let img = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "错误") {
+                img.isTemplate = true
+                errorItem.image = img
+            }
+            menu.addItem(errorItem)
+            menu.addItem(NSMenuItem.separator())
         }
-        menu.addItem(infoItem)
-
-        menu.addItem(NSMenuItem.separator())
 
         // ── 退出 ──
         let quitItem = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "q")
@@ -151,48 +152,14 @@ final class MenuController: NSObject, NSMenuDelegate {
         delegate?.quitApp()
     }
 
-    @objc private func showKernelInfo() {
-        let currentVersion = appState.kernelVersion
-
-        Task {
-            let latestVersion = await (delegate?.fetchLatestVersion() ?? "获取失败")
-            let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
-            let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "未知"
-
-            let alert = NSAlert()
-            alert.messageText = "版本信息"
-            alert.informativeText = """
-            软件版本: \(appVersion)
-            构建版本: \(buildVersion)
-            当前内核版本: \(currentVersion)
-            最新内核版本: \(latestVersion)
-            """
-            alert.alertStyle = .informational
-
-            let canUpdate = latestVersion != "获取失败"
-                && !KernelUpdater.shared.isCurrentKernelVersion(currentVersion, matching: latestVersion)
-
-            if canUpdate {
-                alert.addButton(withTitle: "更新")
-                alert.addButton(withTitle: "关闭")
-
-                await MainActor.run {
-                    let response = alert.runModal()
-                    if response == .alertFirstButtonReturn {
-                        delegate?.updateKernel()
-                    }
-                }
-            } else {
-                alert.addButton(withTitle: "关闭")
-                alert.runModal()
-            }
-        }
-    }
-
     // MARK: - NSMenuDelegate
 
     func menuWillOpen(_ menu: NSMenu) {
         delegate?.menuWillOpen()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        appState.lastError = nil
     }
 }
 
@@ -204,8 +171,5 @@ protocol MenuControllerDelegate: AnyObject {
     func selectProxy(name: String, in group: String)
     func toggleProxy()
     func openSettings()
-    func updateKernel()
     func quitApp()
-    func fetchLatestVersion() async -> String
-    func canOfferUpdate() async -> Bool
 }

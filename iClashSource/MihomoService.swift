@@ -17,13 +17,11 @@ final class MihomoService: ObservableObject {
     private let mixedPort: UInt16 = 7890
     private let statusNotification = Notification.Name("MihomoStatusChanged")
 
+    /// 正常停止标记 — 用于区分崩溃与主动停止
+    private var isStoppingNormally = false
+
     /// 内核版本
     private(set) var kernelVersion: String = "未知"
-
-    /// 更新内核版本（供外部调用）
-    func updateKernelVersion(_ version: String) {
-        kernelVersion = version
-    }
 
     private var recentOutput = ""
 
@@ -111,6 +109,7 @@ final class MihomoService: ObservableObject {
     /// 停止 Mihomo 内核（不清除系统代理）
     func stop() {
         logger.info("Stopping mihomo kernel")
+        isStoppingNormally = true
 
         guard let process = process else {
             return
@@ -130,44 +129,11 @@ final class MihomoService: ObservableObject {
     }
 
     func resolveMihomoPath(bundleMihomo: URL, configMihomo: URL) throws -> URL {
-        if FileManager.default.fileExists(atPath: configMihomo.path) {
-            do {
-                try validateMihomo(at: configMihomo)
-                return configMihomo
-            } catch {
-                logger.error("User-installed mihomo is invalid, restoring from bundled binary: \(error.localizedDescription, privacy: .public)")
-            }
+        guard FileManager.default.fileExists(atPath: bundleMihomo.path) else {
+            throw MihomoError.mihomoNotFound
         }
-
-        if FileManager.default.fileExists(atPath: bundleMihomo.path) {
-            try validateMihomo(at: bundleMihomo)
-            do {
-                try installBundledMihomoIfNeeded(from: bundleMihomo, to: configMihomo)
-                try validateMihomo(at: configMihomo)
-                return configMihomo
-            } catch {
-                logger.error("Failed to bootstrap user mihomo from bundle, using bundled binary directly: \(error.localizedDescription, privacy: .public)")
-                return bundleMihomo
-            }
-        }
-
-        throw MihomoError.mihomoNotFound
-    }
-
-    private func installBundledMihomoIfNeeded(from bundleMihomo: URL, to configMihomo: URL) throws {
-        let fileManager = FileManager.default
-        let configDirectory = configMihomo.deletingLastPathComponent()
-
-        if !fileManager.fileExists(atPath: configDirectory.path) {
-            try fileManager.createDirectory(at: configDirectory, withIntermediateDirectories: true)
-        }
-
-        if fileManager.fileExists(atPath: configMihomo.path) {
-            try fileManager.removeItem(at: configMihomo)
-        }
-
-        try fileManager.copyItem(at: bundleMihomo, to: configMihomo)
-        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: configMihomo.path)
+        try validateMihomo(at: bundleMihomo)
+        return bundleMihomo
     }
 
     /// 验证 Mihomo 可执行性
@@ -377,7 +343,12 @@ final class MihomoService: ObservableObject {
 
         if wasRunning {
             try? setSystemProxy(enabled: false)
+            if !isStoppingNormally {
+                logger.error("mihomo crashed unexpectedly")
+                NotificationCenter.default.post(name: .mihomoCrashed, object: nil)
+            }
         }
+        isStoppingNormally = false
         updateRunningState(false)
     }
 

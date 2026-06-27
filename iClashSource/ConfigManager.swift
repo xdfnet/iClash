@@ -47,27 +47,36 @@ final class ConfigManager {
         try? ensureGeoIPExists()
     }
 
-    /// 确保 GeoIP 数据库存在
+    /// 确保 GeoIP 数据库存在（从 Bundle 创建符号链接，不占用额外空间）
     private func ensureGeoIPExists() throws {
         let geoipPath = configDirectory.appendingPathComponent("Country.mmdb")
-        guard !FileManager.default.fileExists(atPath: geoipPath.path) else { return }
+        let fileManager = FileManager.default
 
-        // 从 app bundle 复制
-        if let resourcePath = Bundle.main.resourceURL {
-            let bundleGeoIP = resourcePath.appendingPathComponent("Country.mmdb")
-            if FileManager.default.fileExists(atPath: bundleGeoIP.path) {
-                try FileManager.default.copyItem(at: bundleGeoIP, to: geoipPath)
+        // 如果已有符号链接但指向的目标不存在，删掉重建
+        if fileManager.fileExists(atPath: geoipPath.path) {
+            let resourceValues = try? geoipPath.resourceValues(forKeys: [.isSymbolicLinkKey])
+            if resourceValues?.isSymbolicLink == true {
+                let realPath = try fileManager.destinationOfSymbolicLink(atPath: geoipPath.path)
+                if !fileManager.fileExists(atPath: realPath) {
+                    try fileManager.removeItem(at: geoipPath)
+                }
             }
         }
+
+        guard !fileManager.fileExists(atPath: geoipPath.path) else { return }
+
+        guard let resourcePath = Bundle.main.resourceURL else { return }
+        let bundleGeoIP = resourcePath.appendingPathComponent("Country.mmdb")
+        guard fileManager.fileExists(atPath: bundleGeoIP.path) else { return }
+
+        try fileManager.createSymbolicLink(at: geoipPath, withDestinationURL: bundleGeoIP)
     }
 
-    /// 确保基础配置目录存在（在 init 中已自动创建）
-    func ensureBaseConfigurationExists() throws {
-        // 目录已在 init 中创建
-    }
-
-    /// 获取运行时配置文件路径，如果可行会先刷新远程订阅
+    /// 获取运行时配置文件路径（文件已存在时跳过下载）
     func prepareRuntimeConfigFile() async throws -> URL {
+        if FileManager.default.fileExists(atPath: runtimeConfigFile.path) {
+            return runtimeConfigFile
+        }
         do {
             try await refreshRuntimeConfig()
         } catch {

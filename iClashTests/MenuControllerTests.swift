@@ -17,13 +17,12 @@ final class MenuControllerTests: XCTestCase {
     func testBuildMenu_createsAllItems() {
         let menu = menuController.buildMenu()
 
-        XCTAssertEqual(menu.items.count, 9)
+        XCTAssertEqual(menu.items.count, 7)
 
         let titles = menu.items.compactMap { $0.title }
         XCTAssertTrue(titles.contains("启动代理"))
         XCTAssertTrue(titles.contains("切换节点"))
         XCTAssertTrue(titles.contains("订阅设置"))
-        XCTAssertTrue(titles.contains("软件版本"))
         XCTAssertTrue(titles.contains("退出"))
     }
 
@@ -50,14 +49,6 @@ final class MenuControllerTests: XCTestCase {
         let settingsItem = menu.items.first { $0.title == "订阅设置" }
         XCTAssertNotNil(settingsItem)
         XCTAssertNotNil(settingsItem?.target)
-    }
-
-    func testBuildMenu_includesVersionItem() {
-        let menu = menuController.buildMenu()
-
-        let versionItem = menu.items.first { $0.title == "软件版本" }
-        XCTAssertNotNil(versionItem)
-        XCTAssertNotNil(versionItem?.target)
     }
 
     func testBuildMenu_includesQuitItem() {
@@ -91,7 +82,6 @@ private final class FakeMenuControllerDelegate: MenuControllerDelegate {
     var selectProxyCallCount = 0
     var toggleProxyCallCount = 0
     var openSettingsCallCount = 0
-    var updateKernelCallCount = 0
     var quitAppCallCount = 0
     var lastSelectedProxy: (name: String, group: String)?
 
@@ -100,7 +90,6 @@ private final class FakeMenuControllerDelegate: MenuControllerDelegate {
         selectProxyCallCount = 0
         toggleProxyCallCount = 0
         openSettingsCallCount = 0
-        updateKernelCallCount = 0
         quitAppCallCount = 0
         lastSelectedProxy = nil
     }
@@ -122,19 +111,7 @@ private final class FakeMenuControllerDelegate: MenuControllerDelegate {
         openSettingsCallCount += 1
     }
 
-    func updateKernel() {
-        updateKernelCallCount += 1
-    }
-
     func quitApp() {
         quitAppCallCount += 1
-    }
-
-    func fetchLatestVersion() async -> String {
-        return "v1.19.26"
-    }
-
-    func canOfferUpdate() async -> Bool {
-        return false
     }
 }

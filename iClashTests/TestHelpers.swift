@@ -12,7 +12,6 @@ final class FakeKernelService: MihomoServiceProtocol {
     private(set) var stopCallCount = 0
     private(set) var startCallCount = 0
     private(set) var proxyEnableRequests: [Bool] = []
-    private(set) var updatedVersions: [String] = []
     private(set) var fetchVersionCallCount = 0
 
     init(isRunning: Bool, proxyEnabled: Bool) {
@@ -24,32 +23,10 @@ final class FakeKernelService: MihomoServiceProtocol {
     func stop() { stopCallCount += 1; isRunning = false }
     func start() async throws { startCallCount += 1; isRunning = true }
     func setSystemProxy(enabled: Bool) throws { proxyEnableRequests.append(enabled) }
-    func updateKernelVersion(_ version: String) { updatedVersions.append(version) }
     func fetchKernelVersion() async { fetchVersionCallCount += 1 }
     func fetchProxies() async throws -> [String: ProxyInfo] { [:] }
     func selectProxy(name: String, in group: String) async throws {}
 }
-
-@MainActor
-final class FakeKernelUpdater: KernelUpdateManaging {
-    let result: KernelUpdateResult
-    let installError: Error?
-    private(set) var installCallCount = 0
-    private(set) var cleanupCallCount = 0
-
-    init(result: KernelUpdateResult, installError: Error? = nil) {
-        self.result = result
-        self.installError = installError
-    }
-
-    func updateKernel() async -> KernelUpdateResult { result }
-    func installKernel(from downloadedPath: URL) throws {
-        installCallCount += 1
-        if let installError { throw installError }
-    }
-    func cleanupTemporaryDownload() { cleanupCallCount += 1 }
-}
-
 final class FakeConfigManager: ConfigManagerProtocol {
     var configDirectory: URL { URL(fileURLWithPath: "/tmp/.config/iclash") }
     var runtimeConfigFile: URL { configDirectory.appendingPathComponent("config.yaml") }

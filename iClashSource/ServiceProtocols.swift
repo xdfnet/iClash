@@ -16,7 +16,6 @@ protocol ConfigManagerProtocol {
     var runtimeConfigFile: URL { get }
     var runtimeConfigFileExists: Bool { get }
 
-    func ensureBaseConfigurationExists() throws
     func prepareRuntimeConfigFile() async throws -> URL
     func downloadAndValidateConfig(url: String, retryCount: Int) async throws -> URL
     func parseProxyGroupsOrder() -> [(name: String, proxies: [String])]
@@ -49,7 +48,7 @@ protocol AppSettingsProtocol: AnyObject {
     var lastUpdateTime: Date? { get set }
 }
 
-// MARK: - Kernel Service (used by KernelUpdater)
+// MARK: - Kernel Service
 
 @MainActor
 protocol KernelServiceControlling: AnyObject {
@@ -58,30 +57,20 @@ protocol KernelServiceControlling: AnyObject {
     func stop()
     func start() async throws
     func setSystemProxy(enabled: Bool) throws
-    func updateKernelVersion(_ version: String)
     func fetchKernelVersion() async
-}
-
-@MainActor
-protocol KernelUpdateManaging: AnyObject {
-    func updateKernel() async -> KernelUpdateResult
-    func installKernel(from downloadedPath: URL) throws
-    func cleanupTemporaryDownload()
-}
-
-// MARK: - 更新结果
-
-enum KernelUpdateFlowResult {
-    case alreadyLatest
-    case updated(version: String, restarted: Bool)
-    case failed(Error)
 }
 
 // MARK: - Conformances
 
 extension MihomoService: MihomoServiceProtocol {}
 extension MihomoService: KernelServiceControlling {}
-extension KernelUpdater: KernelUpdateManaging {}
 extension ConfigManager: ConfigManagerProtocol {}
 extension ProxyManager: ProxyManagerProtocol {}
 extension AppSettings: AppSettingsProtocol {}
+
+// MARK: - 通知
+
+extension Notification.Name {
+    /// 内核进程意外退出时发送
+    static let mihomoCrashed = Notification.Name("mihomoCrashed")
+}
