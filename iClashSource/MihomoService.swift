@@ -26,7 +26,6 @@ final class MihomoService: ObservableObject {
     private init() {}
 
     /// 启动 Mihomo
-    /// - Parameter setProxy: 是否设置系统代理（默认 true）
     func start() async throws {
         guard !isRunning else { return }
 
@@ -86,19 +85,27 @@ final class MihomoService: ObservableObject {
             guard process.isRunning else {
                 self.process = nil
                 self.apiUrl = nil
+                DaemonLogger.shared.log("KERNEL", "❌ 启动后立即退出: \(recentOutput.prefix(200))")
                 throw MihomoError.processExitedImmediately(details: recentOutput)
             }
 
             updateRunningState(true)
+            DaemonLogger.shared.log("KERNEL", "启动成功，PID: \(process.processIdentifier)")
 
+        } catch let error as MihomoError {
+            if process.isRunning { process.terminate() }
+            self.process = nil
+            self.apiUrl = nil
+            updateRunningState(false)
+            DaemonLogger.shared.log("KERNEL", "❌ 启动失败: \(error.localizedDescription)")
+            throw error
         } catch {
-            if process.isRunning {
-                process.terminate()
-            }
+            if process.isRunning { process.terminate() }
             self.process = nil
             self.apiUrl = nil
             updateRunningState(false)
             logger.error("Failed to start mihomo: \(error.localizedDescription, privacy: .public)")
+            DaemonLogger.shared.log("KERNEL", "❌ 启动异常: \(error.localizedDescription)")
             throw MihomoError.failedToStart(error, details: recentOutput)
         }
     }
@@ -111,11 +118,12 @@ final class MihomoService: ObservableObject {
         guard let process = process else {
             return
         }
+        let pid = process.processIdentifier
         process.terminate()
         self.process = nil
         self.apiUrl = nil
         updateRunningState(false)
-        logger.info("mihomo process terminated")
+        DaemonLogger.shared.log("KERNEL", "已停止 (PID: \(pid))")
     }
 
     /// 获取 Mihomo 可执行文件路径
@@ -338,6 +346,7 @@ final class MihomoService: ObservableObject {
         if wasRunning {
             if !isStoppingNormally {
                 logger.error("mihomo crashed unexpectedly")
+                DaemonLogger.shared.log("KERNEL", "❌ 意外崩溃，将自动重启")
                 NotificationCenter.default.post(name: .mihomoCrashed, object: nil)
             }
         }

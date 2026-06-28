@@ -17,14 +17,14 @@ protocol ConfigManagerProtocol {
     var runtimeConfigFileExists: Bool { get }
 
     func prepareRuntimeConfigFile() async throws -> URL
-    func downloadAndValidateConfig(url: String, retryCount: Int) async throws -> URL
+    func downloadIfChanged(url: String, retryCount: Int) async throws -> Bool
     func parseProxyGroupsOrder() -> [String]
 }
 
 extension ConfigManagerProtocol {
     /// 提供默认 retryCount = 3
-    func downloadAndValidateConfig(url: String) async throws -> URL {
-        try await downloadAndValidateConfig(url: url, retryCount: 3)
+    func downloadIfChanged(url: String) async throws -> Bool {
+        try await downloadIfChanged(url: url, retryCount: 3)
     }
 }
 

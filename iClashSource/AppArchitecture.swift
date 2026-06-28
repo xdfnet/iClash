@@ -96,17 +96,22 @@ final class AppCoordinator {
             return
         }
 
+        DaemonLogger.shared.log("AUTO", "启动应用，订阅地址: \(settings.hasSubscriptionURL ? "已配置" : "未配置")")
+
         // 已有运行配置则直接启动内核，避免每次启动都重新下载
         if config.runtimeConfigFileExists {
             do {
+                DaemonLogger.shared.log("AUTO", "config.yaml 已存在，直接启动内核")
                 try await mihomo.start()
                 async let fetchVersion: Void = mihomo.fetchKernelVersion()
                 async let refreshProxies: Void = proxy.refreshProxyList()
                 _ = await (fetchVersion, refreshProxies)
                 appState.syncFromServices(mihomo: mihomo, proxy: proxy)
+                DaemonLogger.shared.log("AUTO", "启动完成，内核版本: \(mihomo.kernelVersion)")
                 return
             } catch {
                 logger.warning("使用现有配置启动失败，将重新下载: \(error.localizedDescription, privacy: .public)")
+                DaemonLogger.shared.log("AUTO", "使用现有配置启动失败: \(error.localizedDescription)")
             }
         }
 
@@ -118,27 +123,45 @@ final class AppCoordinator {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmed.isEmpty else {
+            DaemonLogger.shared.log("SUB", "订阅地址为空，清除订阅")
             await clearSubscription()
             return
         }
 
-        await stopServices()
+        DaemonLogger.shared.log("SUB", "保存订阅 → \(trimmed.prefix(40))...")
+
+        // 先关代理
+        safelySetProxy(enabled: false)
+        DaemonLogger.shared.log("PROXY", "已关闭系统代理")
 
         do {
-            logger.info("Downloading subscription...")
-            _ = try await config.downloadAndValidateConfig(url: trimmed)
+            let changed = try await config.downloadIfChanged(url: trimmed)
 
-            logger.info("Starting mihomo kernel...")
+            guard changed else {
+                DaemonLogger.shared.log("SUB", "内容无变化，无需重启内核")
+                // 如果内核没在跑还是得拉起来
+                if !mihomo.isRunning {
+                    try await mihomo.start()
+                }
+                appState.syncFromServices(mihomo: mihomo, proxy: proxy)
+                return
+            }
+
+            // 内容有变化 → 停旧内核 → 启新内核
+            await stopServices()
+            DaemonLogger.shared.log("KERNEL", "正在启动内核...")
             try await mihomo.start()
+            DaemonLogger.shared.log("KERNEL", "内核启动成功")
 
             async let fetchVersion: Void = mihomo.fetchKernelVersion()
             async let refreshProxies: Void = proxy.refreshProxyList()
             _ = await (fetchVersion, refreshProxies)
 
             appState.syncFromServices(mihomo: mihomo, proxy: proxy)
-            logger.info("Service started successfully")
+            DaemonLogger.shared.log("SUB", "订阅更新完成，内核版本: \(mihomo.kernelVersion)")
         } catch {
-            logger.error("Failed to start: \(error.localizedDescription, privacy: .public)")
+            logger.error("Failed to apply subscription: \(error.localizedDescription, privacy: .public)")
+            DaemonLogger.shared.log("SUB", "❌ 失败: \(error.localizedDescription)")
             appState.resetRuntime()
             appState.lastError = "启动失败: \(error.localizedDescription)"
         }
@@ -152,6 +175,7 @@ final class AppCoordinator {
 
     private func stopServices() async {
         if mihomo.isRunning {
+            DaemonLogger.shared.log("KERNEL", "停止内核")
             mihomo.stop()
         }
         proxy.reset()
@@ -164,19 +188,25 @@ final class AppCoordinator {
             appState.lastError = "请先配置订阅地址"
             return
         }
+        let action = appState.isProxyEnabled ? "关闭" : "开启"
+        DaemonLogger.shared.log("PROXY", "\(action)系统代理")
         if appState.isProxyEnabled {
             safelySetProxy(enabled: false)
         } else {
             safelySetProxy(enabled: true)
         }
         appState.isProxyEnabled = mihomo.isSystemProxyEnabled()
+        DaemonLogger.shared.log("PROXY", "当前状态: \(appState.isProxyEnabled ? "已开启" : "已关闭")")
     }
 
     func selectProxy(name: String, in group: String) async {
+        DaemonLogger.shared.log("NODE", "切换节点 [\(group)] → \(name)")
         do {
             try await proxy.selectProxy(name: name, in: group)
             appState.currentSelections = proxy.currentSelections
+            DaemonLogger.shared.log("NODE", "切换成功 [\(group)] → \(name)")
         } catch {
+            DaemonLogger.shared.log("NODE", "❌ 切换失败 [\(group)]: \(error.localizedDescription)")
             appState.lastError = "切换节点失败: \(error.localizedDescription)"
         }
     }
@@ -192,9 +222,63 @@ final class AppCoordinator {
     // MARK: - 退出
 
     func prepareForQuit() {
+        DaemonLogger.shared.log("APP", "退出应用")
         if mihomo.isRunning {
             mihomo.stop()
         }
         proxy.reset()
+    }
+}
+
+// MARK: - DaemonLogger
+
+/// 守护日志 — 记录关键操作和结果到 daemon.log，方便排查问题
+@MainActor
+struct DaemonLogger {
+    static let shared = DaemonLogger()
+
+    private let logFile: URL
+    private let dateFormatter: DateFormatter
+    private let fileHandleQueue = DispatchQueue(label: "com.iclash.daemon-log")
+
+    private init() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        logFile = home.appendingPathComponent(".config/iclash/daemon.log")
+
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        df.locale = Locale(identifier: "zh_CN")
+        dateFormatter = df
+    }
+
+    /// 追加一条日志，自动带时间戳和换行
+    func log(_ tag: String, _ message: String) {
+        let timestamp = dateFormatter.string(from: Date())
+        let line = "[\(timestamp)] \(tag) \(message)\n"
+
+        guard let data = line.data(using: .utf8) else { return }
+
+        fileHandleQueue.sync {
+            if !FileManager.default.fileExists(atPath: logFile.path) {
+                FileManager.default.createFile(atPath: logFile.path, contents: nil)
+            }
+            guard let handle = FileHandle(forWritingAtPath: logFile.path) else { return }
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        }
+    }
+
+    /// 读取全部日志
+    func readAll() -> String {
+        guard let data = try? Data(contentsOf: logFile) else { return "" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// 清空日志
+    func clear() {
+        fileHandleQueue.sync {
+            try? "".data(using: .utf8)?.write(to: logFile)
+        }
     }
 }

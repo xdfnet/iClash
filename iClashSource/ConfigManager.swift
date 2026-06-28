@@ -94,8 +94,9 @@ final class ConfigManager {
         return runtimeConfigFile
     }
 
-    /// 下载订阅并保存到 config.yaml（带重试）
-    func downloadAndValidateConfig(url: String, retryCount: Int = 3) async throws -> URL {
+    /// 下载订阅、检测类型，仅内容变化时写入磁盘
+    /// - Returns: true=内容已更新并写入磁盘；false=内容无变化，跳过
+    func downloadIfChanged(url: String, retryCount: Int = 3) async throws -> Bool {
         guard URL(string: url) != nil else {
             throw ConfigError.invalidSubscriptionURL
         }
@@ -106,13 +107,24 @@ final class ConfigManager {
 
         for attempt in 0..<retryCount {
             do {
-                let content = try await downloadSubscriptionContent(from: url)
-                try Data(content.utf8).write(to: runtimeConfigFile, options: .atomic)
-                logger.info("Wrote runtime config to \(self.runtimeConfigFile.path, privacy: .public), size: \(content.count)")
-                return runtimeConfigFile
+                let rawContent = try await downloadSubscriptionContent(from: url)
+                guard !rawContent.isEmpty else { throw ConfigError.emptySubscription }
+
+                let configContent = generateConfigContent(from: rawContent)
+
+                if !isContentChanged(rawContent) {
+                    DaemonLogger.shared.log("SUB", "内容无变化，跳过")
+                    return false
+                }
+
+                try saveContent(rawContent, configContent: configContent)
+                DaemonLogger.shared.log("SUB", "内容已更新，写入磁盘")
+                return true
             } catch {
                 lastError = error
-                logger.warning("Download attempt \(attempt + 1) failed: \(error.localizedDescription, privacy: .public)")
+                let errMsg = error.localizedDescription
+                logger.warning("Download attempt \(attempt + 1) failed: \(errMsg, privacy: .public)")
+                DaemonLogger.shared.log("SUB", "⚠️ 下载失败 (第\(attempt + 1)次): \(errMsg)")
                 if attempt < retryCount - 1 {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                 }
@@ -122,12 +134,13 @@ final class ConfigManager {
         throw lastError ?? ConfigError.networkError(NSError(domain: "ConfigManager", code: -1))
     }
 
-    /// 从订阅地址生成运行配置
+    /// 从订阅地址生成运行配置（仅首次启动无 config.yaml 时调用）
     func refreshRuntimeConfig() async throws {
         logger.info("Refreshing runtime config from subscription")
-        let content = try await downloadSubscriptionContent(from: subscriptionURL)
-        try Data(content.utf8).write(to: runtimeConfigFile, options: .atomic)
-        logger.info("Updated runtime config at \(self.runtimeConfigFile.path, privacy: .public), size: \(content.count)")
+        let rawContent = try await downloadSubscriptionContent(from: subscriptionURL)
+        let configContent = generateConfigContent(from: rawContent)
+        try saveContent(rawContent, configContent: configContent)
+        logger.info("Updated runtime config at \(self.runtimeConfigFile.path, privacy: .public)")
     }
 
     /// 下载订阅内容并验证
@@ -180,23 +193,10 @@ final class ConfigManager {
             content = decodedContent
         }
 
-        content = try normalizeSubscriptionContent(content)
-
         return content
     }
 
     // MARK: - 订阅内容处理
-
-    /// 归一化订阅内容：URI 列表 → proxy-provider + config.yaml；完整 YAML → 直通
-    func normalizeSubscriptionContent(_ content: String) throws -> String {
-        if isURIList(content) {
-            logger.info("Detected proxy URI list, generating config with proxy-providers")
-            try saveProviderFile(content)
-            return generateConfigWithProviders()
-        }
-        logger.info("Subscription content is already a config file")
-        return content
-    }
 
     /// 检查内容是否为纯 URI 列表（每行都是支持的 URI 格式）
     private func isURIList(_ content: String) -> Bool {
@@ -214,21 +214,54 @@ final class ConfigManager {
         }
     }
 
-    /// 将 URI 列表保存为 Mihomo proxy-provider 文件
-    private func saveProviderFile(_ content: String) throws {
-        let providerPath = configDirectory.appendingPathComponent(Self.providerFileName)
-        try Data(content.utf8).write(to: providerPath, options: .atomic)
-        logger.info("Saved provider file to \(providerPath.path, privacy: .public)")
+    /// 对比新内容与当前文件，判断是否有变化
+    private func isContentChanged(_ newConfig: String) -> Bool {
+        // URI 列表 → 对比 providers.txt
+        if isURIList(newConfig) {
+            let providerPath = configDirectory.appendingPathComponent(Self.providerFileName)
+            if let existing = try? String(contentsOf: providerPath, encoding: .utf8) {
+                return existing != newConfig
+            }
+            return true // 文件不存在，视为变化
+        }
+        // YAML 配置 → 对比 config.yaml
+        if let existing = try? String(contentsOf: runtimeConfigFile, encoding: .utf8) {
+            return existing != newConfig
+        }
+        return true
     }
 
-    /// 生成使用 proxy-providers 的完整配置
+    /// 保存订阅内容到磁盘（URI 列表 → providers.txt + config.yaml；YAML → config.yaml）
+    private func saveContent(_ rawContent: String, configContent: String) throws {
+        if isURIList(rawContent) {
+            let providerPath = configDirectory.appendingPathComponent(Self.providerFileName)
+            try Data(rawContent.utf8).write(to: providerPath, options: .atomic)
+            logger.info("Saved provider file to \(providerPath.path, privacy: .public)")
+        }
+        try Data(configContent.utf8).write(to: runtimeConfigFile, options: .atomic)
+        logger.info("Wrote runtime config to \(self.runtimeConfigFile.path, privacy: .public), size: \(configContent.count)")
+    }
+
+    /// 生成最终配置内容
+    private func generateConfigContent(from rawContent: String) -> String {
+        if isURIList(rawContent) {
+            let lineCount = rawContent.components(separatedBy: .newlines)
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+            DaemonLogger.shared.log("CONFIG", "URI 列表 (\(lineCount) 条)，生成 proxy-providers 配置")
+            return generateConfigWithProviders()
+        }
+        DaemonLogger.shared.log("CONFIG", "YAML 配置，直通使用")
+        return rawContent
+    }
+
+    /// 生成使用 proxy-providers 的完整配置模板
     private func generateConfigWithProviders() -> String {
         """
         \(DefaultRules.baseConfig)
         proxy-providers:
           mysub:
             type: file
-            path: \(Self.providerFileName)
+            path: \(configDirectory.appendingPathComponent(Self.providerFileName).path)
             health-check:
               enable: true
               url: http://www.gstatic.com/generate_204

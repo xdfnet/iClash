@@ -33,6 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appSettings = AppSettings.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DaemonLogger.shared.log("APP", "应用启动，版本: 1.6.2")
+        DaemonLogger.shared.log("APP", "Bundle: \(Bundle.main.bundleURL.path)")
+
         setupStatusBar()
         setupMenu()
 
@@ -108,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func subscriptionSettingsDidSave(_ notification: Notification) {
         let savedURL = (notification.userInfo?["subscriptionURL"] as? String) ?? appSettings.subscriptionURL
+        DaemonLogger.shared.log("SUB", "收到保存通知: \(savedURL.prefix(40))...")
         Task {
             await coordinator.applySubscription(url: savedURL)
             self.syncUI()
@@ -136,13 +140,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleMihomoCrashed(_ notification: Notification) {
         Task {
             do {
+                DaemonLogger.shared.log("KERNEL", "自动重启中...")
                 try await mihomoService.start()
                 async let _ = mihomoService.fetchKernelVersion()
                 async let _ = ProxyManager.shared.refreshProxyList()
                 _ = await ((), ())
                 appState.syncFromServices(mihomo: mihomoService, proxy: ProxyManager.shared)
                 syncUI()
+                DaemonLogger.shared.log("KERNEL", "自动重启完成")
             } catch {
+                DaemonLogger.shared.log("KERNEL", "❌ 自动重启失败: \(error.localizedDescription)")
                 showError("Mihomo 内核崩溃后自动重启失败: \(error.localizedDescription)")
             }
         }

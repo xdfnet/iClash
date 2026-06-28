@@ -2,6 +2,13 @@
 
 > iClash — 基于 Mihomo 内核的 macOS 菜单栏代理客户端。Swift 开发，支持多种代理协议和订阅格式。
 
+## 1.6.3 — 2026-06-28
+
+- **Log**: Add daemon.log at `~/.config/iclash/daemon.log`, log all key actions for troubleshooting
+- **Optimize**: Skip kernel restart when subscription content hasn't changed
+- **Stability**: Disable system proxy before subscription download to avoid interference
+- **Robustness**: Use absolute path for providers.txt in generated config
+
 ## 1.6.2 — 2026-06-28
 
 - **Proxy**: Switch from SOCKS-only to HTTP + HTTPS + SOCKS all three, all pointing to mixed-port 7890
