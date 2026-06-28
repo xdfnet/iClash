@@ -153,27 +153,33 @@ final class MihomoService: ObservableObject {
         }
     }
 
-    /// 设置或清除系统代理（使用 SOCKS 代理）
+    /// 设置或清除系统代理（HTTP + HTTPS + SOCKS，均指向 mixed-port）
     func setSystemProxy(enabled: Bool) throws {
         let services = fetchActiveNetworkServices()
         for service in services {
             if enabled {
+                try runNetworkSetup(arguments: ["-setwebproxy", service, "127.0.0.1", "\(mixedPort)"])
+                try runNetworkSetup(arguments: ["-setwebproxystate", service, "on"])
+                try runNetworkSetup(arguments: ["-setsecurewebproxy", service, "127.0.0.1", "\(mixedPort)"])
+                try runNetworkSetup(arguments: ["-setsecurewebproxystate", service, "on"])
                 try runNetworkSetup(arguments: ["-setsocksfirewallproxy", service, "127.0.0.1", "\(mixedPort)"])
                 try runNetworkSetup(arguments: ["-setsocksfirewallproxystate", service, "on"])
             } else {
+                try runNetworkSetup(arguments: ["-setwebproxystate", service, "off"])
+                try runNetworkSetup(arguments: ["-setsecurewebproxystate", service, "off"])
                 try runNetworkSetup(arguments: ["-setsocksfirewallproxystate", service, "off"])
             }
         }
     }
 
-    /// 检查系统 SOCKS 代理是否启用（通过 networksetup 查询）
+    /// 检查系统 HTTP 代理是否启用（通过 networksetup 查询）
     func isSystemProxyEnabled() -> Bool {
         let services = fetchActiveNetworkServices()
         for service in services {
             let task = Process()
             let outputPipe = Pipe()
             task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
-            task.arguments = ["-getsocksfirewallproxy", service]
+            task.arguments = ["-getwebproxy", service]
             task.standardOutput = outputPipe
             task.standardError = Pipe()
             task.environment = ProcessInfo.processInfo.environment

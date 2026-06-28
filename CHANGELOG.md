@@ -2,6 +2,11 @@
 
 > iClash — 基于 Mihomo 内核的 macOS 菜单栏代理客户端。Swift 开发，支持多种代理协议和订阅格式。
 
+## 1.6.2 — 2026-06-28
+
+- **Proxy**: Switch from SOCKS-only to HTTP + HTTPS + SOCKS all three, all pointing to mixed-port 7890
+- **Detection**: Check HTTP proxy state instead of SOCKS for menu display
+
 ## 1.6.1 — 2026-06-28
 
 - **Simplify**: Replace URI parsing with Mihomo native proxy-providers, remove 400+ lines of parser code
