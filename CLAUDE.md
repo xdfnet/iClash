@@ -129,13 +129,9 @@ Notification.Name:
                   ↓
               normalizeSubscriptionContent()
                   ↓
-              classifySubscriptionContent()
-                  ↓
-              ├── proxyURIList → generateConfigFromUriList()
-              │                   ↓
-              │                 拼接 DefaultRules.baseConfig + proxies + proxy-groups + rulesSection
-              │
-              └── configFile  →  直接保存为运行时配置
+              ├── URI列表? → 保存 providers.txt + 生成 proxy-providers 配置
+              │                (Mihomo 原生解析 URI，app 不做转译)
+              └── 完整 YAML → 直通保存
 ```
 
 ### 内核通信（REST API）
@@ -147,9 +143,9 @@ Mihomo 暴露 HTTP API `127.0.0.1:9090`：
 
 ### 代理支持
 
-- AnyTLS（自定义手动 URI 解析，避免 Foundation URL 组件截断密码特殊字符）
-- Shadowsocks（SS / shadowsocks 协议 URI）
-- 订阅 → 内核运行时配置自动生成（默认代理组：BoostNet、自动选择、故障转移）
+- 所有 URI 格式（anytls://, ss://, vmess://, trojan://, vless://, hysteria2://, tuic:// 等）由 Mihomo `proxy-providers` 原生解析
+- 订阅 → 保存为 `providers.txt`，生成 proxy-providers 配置
+- 默认代理组：BoostNet、自动选择、故障转移
 
 ### 内置资源
 
@@ -160,7 +156,7 @@ Mihomo 暴露 HTTP API `127.0.0.1:9090`：
 
 - 框架：XCTest
 - 模式：Fake 测试替身（protocol-based，手动注入到 `AppCoordinator` / `MenuController`）
-- 单测覆盖：`AppSettingsTests`（UserDefaults 读写验证）、`ConfigManagerTests`（URI → YAML 转换）、`MenuControllerTests`（菜单构建状态）、`MihomoServiceTests`（内核文件解析）、`ProxyManagerTests`（缓存/重置逻辑）
+- 单测覆盖：`AppSettingsTests`（UserDefaults 读写验证）、`ConfigManagerTests`（proxy-providers 生成）、`MenuControllerTests`（菜单构建状态）、`MihomoServiceTests`（内核文件解析）、`ProxyManagerTests`（缓存/重置逻辑）
 
 > **注意**：当前测试主要覆盖纯逻辑层（配置解析、菜单构建），核心集成测试（AppCoordinator 编排流程）尚未覆盖。
 

@@ -70,11 +70,11 @@ iClash 是一个面向 macOS 的轻量级菜单栏代理应用，围绕 Mihomo �
 ### 启动流程
 
 ```text
-1. 下载订阅配置                       首次启动时拉取远程订阅
-2. mihomoService.start()             启动 Mihomo 内核
-3. fetchKernelVersion()              获取内核版本
-4. refreshProxyList()                刷新代理列表
-5. buildMenu()                       构建菜单
+1. autoStart()
+   ├─ 已有 config.yaml → 直接启动内核（秒启）
+   └─ 无配置 → 下载订阅 → 生成 config.yaml → 启动内核
+2. fetchKernelVersion() + refreshProxyList()    并行
+3. syncFromServices()                           同步状态到菜单
 ```
 
 ### 节点切换流程
@@ -87,18 +87,18 @@ iClash 是一个面向 macOS 的轻量级菜单栏代理应用，围绕 Mihomo �
 ### 代理开关流程
 
 ```text
-1. 用户点击“启动代理/停止代理”
-2. setSystemProxy(enabled:)          设置或清除系统代理
-3. buildMenu()                       刷新菜单状态
+1. 用户点击菜单"启动代理/停止代理"
+2. setSystemProxy(enabled:)   设置或清除系统 SOCKS 代理
+3. 下次打开菜单时读取真实状态显示
 ```
+
+app 不保存、不自动管理代理状态，全权交给 macOS。
 
 ## 源码构建
 
 ```bash
 git clone https://github.com/xdfnet/iClash.git
 cd iClash
-brew install xcodegen
-xcodegen generate
 make debug
 ```
 
@@ -139,7 +139,7 @@ iClash/
     ├── AppSettings.swift           # 应用设置、环境变量与 UserDefaults
     ├── DefaultRules.swift          # 默认 DNS 与分流规则
     ├── MihomoService.swift         # 内核生命周期与系统代理控制
-    ├── ConfigManager.swift         # 订阅下载、配置解析与运行时配置生成
+    ├── ConfigManager.swift         # 订阅下载、proxy-providers 生成
     ├── ProxyManager.swift          # 代理列表缓存与节点切换
     ├── MenuController.swift        # 菜单构建与交互
     ├── Resources/

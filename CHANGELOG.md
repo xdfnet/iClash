@@ -2,7 +2,17 @@
 
 > iClash — 基于 Mihomo 内核的 macOS 菜单栏代理客户端。Swift 开发，支持多种代理协议和订阅格式。
 
+## 1.6.1 — 2026-06-28
+
+- **Simplify**: Replace URI parsing with Mihomo native proxy-providers, remove 400+ lines of parser code
+- **Config**: Subscription URI list saved as `providers.txt`, kernel handles parsing natively
+- **Proxy state**: App no longer manages proxy state — only reads on menu open, toggles on user click
+- **Startup**: Skip re-download when config.yaml exists, start kernel directly (faster launch)
+- **Cleanup**: Remove unused imports, dead code, redundant protocol conformance
+- **Icon**: New app icon (bar chart style)
+
 ## 1.6.0 — 2026-06-27
+
 - **Simplify**: Remove KernelUpdater, kernel auto-update, rely on app releases for resource updates
 - **Crash detection**: Post user notification when mihomo kernel crashes unexpectedly, auto-clean system proxy
 - **Menu sync**: Real-time proxy / kernel state check on each menu open; display errors at menu bottom, auto-clear on close

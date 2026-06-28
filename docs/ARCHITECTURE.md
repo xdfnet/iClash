@@ -79,7 +79,7 @@ AppDelegate.subscriptionSettingsDidSave()
 AppCoordinator.applySubscription(url)
   ├─ downloadAndValidateConfig(url)    下载+识别格式
   │    ├─ Base64? → 解码
-  │    ├─ URI列表? → 生成完整 YAML 配置
+  │    ├─ URI列表? → 保存 providers.txt，生成 proxy-providers 配置
   │    └─ 已有 YAML? → 直接使用
   │    └─ 写入 ~/.config/iclash/config.yaml
   ├─ mihomo.start()
@@ -87,7 +87,6 @@ AppCoordinator.applySubscription(url)
   │    ├─ prepareRuntimeConfigFile()   文件已存在则跳过
   │    ├─ process.run()                启动内核进程
   │    └─ 轮询 3s 确认进程存活
-  ├─ setSystemProxy(true)              恢复系统代理
   ├─ fetchKernelVersion() + refreshProxyList()  并行
   └─ syncFromServices()                同步 AppState
 ```
@@ -185,7 +184,8 @@ Bundle (iClash.app)
 └── Contents/Resources/Assets.xcassets
 
 ~/.config/iclash/                      ← 运行时目录
-├── config.yaml                        ← 运行时配置（订阅生成）
+├── config.yaml                        ← 运行时配置（proxy-providers 框架）
+├── providers.txt                      ← 订阅 URI 列表（Mihomo 原生解析）
 ├── Country.mmdb ──符号链接──→ Bundle   ← 通过软链访问，不占额外空间
 └── run/                               ← mihomo 运行时文件
 ```
@@ -205,7 +205,7 @@ Bundle (iClash.app)
 | 查询 | `-getsocksfirewallproxy <service>` |
 
 - 自动枚举所有活跃网络服务
-- 内核意外崩溃时自动清理系统代理设置
+- app 不管理代理状态，仅菜单点击时开/关，打开菜单时读取真实状态
 
 ## 崩溃恢复
 
@@ -213,8 +213,7 @@ Bundle (iClash.app)
 进程终止 → terminationHandler
   ├─ 正常 stop() → isStoppingNormally = true → 跳过
   └─ 崩溃 → isStoppingNormally = false
-       ├─ setSystemProxy(false)        自动清理代理
-       └─ post(.mihomoCrashed)         通知 UI 弹窗
+       └─ post(.mihomoCrashed)    通知自动重启内核
 ```
 
 ## 配置格式支持
@@ -222,7 +221,7 @@ Bundle (iClash.app)
 | 格式 | 检测方式 | 处理 |
 |------|----------|------|
 | Base64 编码 | 尝试 Base64 解码 | 解码后重新识别 |
-| URI 列表 | 所有非空行均为 `scheme://...` 格式 | 生成完整 YAML（含 DNS、代理组、规则） |
+| URI 列表 | 所有非空行均为 `scheme://...` 格式 | 保存为 `providers.txt`，生成 proxy-providers 配置（Mihomo 原生解析） |
 | YAML 配置 | 包含 `proxies:` 或 `rules:` | 直接使用 |
 
-URI 到 YAML 的转换目前支持 `anytls` 和 `ss`/`shadowsocks` 协议。
+URI 列表无需 app 解析，由 Mihomo `proxy-providers` 原生处理，支持 all supported protocols (anytls, ss, vmess, trojan, vless, hysteria2, tuic, etc.)
