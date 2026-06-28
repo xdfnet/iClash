@@ -137,7 +137,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSubscriptionSettingsWindow() {
-        SubscriptionSettingsWindow.shared.present()
+        SubscriptionSettingsWindow.shared.present(
+            currentURL: appSettings.subscriptionURL,
+            onSave: { [weak self] url in
+                guard let self else { return }
+                let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.appSettings.subscriptionURL = trimmed
+                NotificationCenter.default.post(
+                    name: .subscriptionSettingsDidSave,
+                    object: nil,
+                    userInfo: ["subscriptionURL": trimmed]
+                )
+            }
+        )
     }
 
     @objc private func handleMihomoCrashed(_ notification: Notification) {

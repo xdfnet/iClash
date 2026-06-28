@@ -146,7 +146,7 @@ _require_msg:
 _update_version:
 	@echo "$(YELLOW)递增版本号...$(NC)"
 	@PBXPROJ="iClash.xcodeproj/project.pbxproj"; \
-	CURRENT_VERSION=$$(grep -A1 'MARKETING_VERSION' "$$PBXPROJ" | grep '<string>' | head -1 | sed 's/.*<string>\([0-9.]*\)<\/string>.*/\1/'); \
+	CURRENT_VERSION=$$(grep -o 'MARKETING_VERSION = [0-9.]*' "$$PBXPROJ" | head -1 | sed 's/MARKETING_VERSION = //'); \
 	if [ -z "$$CURRENT_VERSION" ]; then \
 		echo "$(RED)错误: 无法从 project.pbxproj 获取当前版本$(NC)"; \
 		exit 1; \
@@ -158,8 +158,7 @@ _update_version:
 	NEW_PATCH=$$((PATCH + 1)); \
 	NEW_VERSION="$$MAJOR.$$MINOR.$$NEW_PATCH"; \
 	echo "$(CYAN)新版本: $$NEW_VERSION$(NC)"; \
-	sed -i '' "s|<string>$$CURRENT_VERSION<\/string>|<string>$$NEW_VERSION<\/string>|g" "$$PBXPROJ"; \
-	sed -i '' "s|<string>1<\/string>|<string>1<\/string>|g" "$$PBXPROJ"; \
+	sed -i '' "s/MARKETING_VERSION = $$CURRENT_VERSION;/MARKETING_VERSION = $$NEW_VERSION;/g" "$$PBXPROJ"; \
 	echo "$(GREEN)project.pbxproj 版本已更新: $$CURRENT_VERSION → $$NEW_VERSION$(NC)"; \
 	if grep -q "github.com/xdfnet/iClash/releases" README.md 2>/dev/null; then \
 		echo "$(YELLOW)更新 README.md release URL...$(NC)"; \
@@ -179,7 +178,7 @@ push: _require_msg _update_version install package
 		echo "$(GREEN)推送完成$(NC)"; \
 	fi
 	@echo "$(YELLOW)创建 GitHub Release...$(NC)"
-	@VERSION=$$(grep -A1 'MARKETING_VERSION' iClash.xcodeproj/project.pbxproj | grep '<string>' | head -1 | sed 's/.*<string>\([0-9.]*\)<\/string>.*/\1/'); \
+		@VERSION=$$(grep -o 'MARKETING_VERSION = [0-9.]*' iClash.xcodeproj/project.pbxproj | head -1 | sed 's/MARKETING_VERSION = //'); \
 	ZIP_PATH=$$(find $(PACKAGE_DIR) -name "$(PROJECT_NAME)-$$VERSION-*.zip" -type f | head -1); \
 	gh release create "v$$VERSION" --title "iClash v$$VERSION" --notes "$(MSG)"; \
 	if [ -n "$$ZIP_PATH" ]; then \
@@ -196,7 +195,7 @@ package:
 		echo "$(RED)错误: 找不到构建的应用程序$(NC)"; \
 		exit 1; \
 	fi; \
-	version=$$(grep -A1 'MARKETING_VERSION' iClash.xcodeproj/project.pbxproj | grep '<string>' | head -1 | sed 's/.*<string>\([0-9.]*\)<\/string>.*/\1/'); \
+	version=$$(grep -o 'MARKETING_VERSION = [0-9.]*' iClash.xcodeproj/project.pbxproj | head -1 | sed 's/MARKETING_VERSION = //'); \
 	build=$$(plutil -extract CFBundleVersion raw "$$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "0"); \
 	zip_path="$(PACKAGE_DIR)/$(PROJECT_NAME)-$$version-$$build.zip"; \
 	rm -f "$$zip_path"; \

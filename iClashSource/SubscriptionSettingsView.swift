@@ -5,54 +5,42 @@ extension Notification.Name {
     static let subscriptionSettingsDidSave = Notification.Name("subscriptionSettingsDidSave")
 }
 
+// MARK: - 订阅设置表单
+
 struct SubscriptionSettingsView: View {
     @State private var subscriptionURL: String = ""
+    let currentURL: String
+    let onSave: (String) -> Void
+    let onDismiss: () -> Void
 
-    private let settings = AppSettings.shared
-    var onDismiss: (() -> Void)?
+    init(currentURL: String, onSave: @escaping (String) -> Void, onDismiss: @escaping () -> Void) {
+        self._subscriptionURL = State(initialValue: currentURL)
+        self.currentURL = currentURL
+        self.onSave = onSave
+        self.onDismiss = onDismiss
+    }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
+            Text("订阅地址")
+                .font(.headline)
             TextField("https://example.com/subscription", text: $subscriptionURL)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.body, design: .monospaced))
-
             HStack {
-                Button("保存", action: saveSettings)
-                    .buttonStyle(PrimaryButtonStyle())
-                Spacer()
+                Button("取消") { onDismiss() }
+                    .keyboardShortcut(.escape)
+                Button("保存") {
+                    onSave(subscriptionURL)
+                    onDismiss()
+                }
+                .keyboardShortcut(.return)
+                .disabled(subscriptionURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(16)
-        .frame(width: 600)
-        .onAppear {
-            subscriptionURL = settings.subscriptionURL
-        }
-    }
-
-    private func saveSettings() {
-        let trimmedURL = subscriptionURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        settings.subscriptionURL = trimmedURL
-        NotificationCenter.default.post(
-            name: .subscriptionSettingsDidSave,
-            object: nil,
-            userInfo: ["subscriptionURL": trimmedURL]
-        )
-
-        onDismiss?()
-    }
-
-}
-
-private struct PrimaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color.accentColor)
-            .foregroundColor(.white)
-            .cornerRadius(8)
-            .opacity(configuration.isPressed ? 0.85 : 1.0)
+        .padding(24)
+        .frame(width: 560)
+        .onAppear { subscriptionURL = currentURL }
     }
 }
 
@@ -63,11 +51,10 @@ final class SubscriptionSettingsWindow: NSWindowController {
     static let shared = SubscriptionSettingsWindow()
 
     private init() {
-        let hostingController = NSHostingController(rootView: SubscriptionSettingsView())
-        let window = NSWindow(contentViewController: hostingController)
+        let hosting = NSHostingController(rootView: EmptyView())
+        let window = NSWindow(contentViewController: hosting)
         window.title = "订阅设置"
-        window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 600, height: 100))
+        window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
@@ -78,12 +65,14 @@ final class SubscriptionSettingsWindow: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func present() {
-        let dismissAction = { [weak self] in
-            self?.dismiss()
-            return ()
-        }
-        window?.contentViewController = NSHostingController(rootView: SubscriptionSettingsView(onDismiss: dismissAction))
+    func present(currentURL: String, onSave: @escaping (String) -> Void) {
+        let dismissAction = { [weak self] in self?.dismiss(); () }
+        let view = SubscriptionSettingsView(
+            currentURL: currentURL,
+            onSave: { url in onSave(url) },
+            onDismiss: dismissAction
+        )
+        window?.contentViewController = NSHostingController(rootView: view)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
