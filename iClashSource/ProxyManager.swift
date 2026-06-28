@@ -22,31 +22,25 @@ final class ProxyManager {
 
     /// 刷新代理列表（不自动启动内核）
     func refreshProxyList() async {
-        guard mihomoService.isRunning else {
-            return
-        }
-
-        if isLoading {
-            return
-        }
-
+        guard mihomoService.isRunning else { return }
+        if isLoading { return }
         if let lastTime = lastRefreshTime,
            Date().timeIntervalSince(lastTime) < cacheValidDuration,
-           !proxyGroups.isEmpty {
-            return
-        }
+           !proxyGroups.isEmpty { return }
 
         isLoading = true
 
         do {
             let proxies = try await mihomoService.fetchProxies()
-            let configGroups = configManager.parseProxyGroupsOrder()
+            let groupOrder = configManager.parseProxyGroupsOrder()
             var groups: [(name: String, proxies: [String])] = []
             var selections: [String: String] = [:]
 
-            for (groupName, configProxies) in configGroups {
+            // 按配置中的 group 顺序构建，代理列表从 API 响应获取
+            for groupName in groupOrder {
                 if let info = proxies[groupName] {
-                    groups.append((name: groupName, proxies: configProxies))
+                    let proxyList = info.all ?? []
+                    groups.append((name: groupName, proxies: proxyList))
                     if let now = info.now {
                         selections[groupName] = now
                     }

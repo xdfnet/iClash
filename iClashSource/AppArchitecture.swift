@@ -95,10 +95,25 @@ final class AppCoordinator {
             appState.resetRuntime()
             return
         }
+
+        // 已有运行配置则直接启动内核，避免每次启动都重新下载
+        if config.runtimeConfigFileExists {
+            do {
+                try await mihomo.start()
+                async let fetchVersion: Void = mihomo.fetchKernelVersion()
+                async let refreshProxies: Void = proxy.refreshProxyList()
+                _ = await (fetchVersion, refreshProxies)
+                appState.syncFromServices(mihomo: mihomo, proxy: proxy)
+                return
+            } catch {
+                logger.warning("使用现有配置启动失败，将重新下载: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+
         await applySubscription(url: settings.subscriptionURL)
     }
 
-    /// 订阅变更：停止旧服务 → 下载新配置 → 启动内核 → 恢复代理
+    /// 订阅变更：停止旧服务 → 下载新配置 → 启动内核
     func applySubscription(url: String) async {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -107,8 +122,7 @@ final class AppCoordinator {
             return
         }
 
-        let proxyWasEnabled = mihomo.isSystemProxyEnabled()
-        await stopServices(clearProxyState: proxyWasEnabled)
+        await stopServices()
 
         do {
             logger.info("Downloading subscription...")
@@ -116,10 +130,6 @@ final class AppCoordinator {
 
             logger.info("Starting mihomo kernel...")
             try await mihomo.start()
-
-            if proxyWasEnabled {
-                safelySetProxy(enabled: true)
-            }
 
             async let fetchVersion: Void = mihomo.fetchKernelVersion()
             async let refreshProxies: Void = proxy.refreshProxyList()
@@ -135,18 +145,12 @@ final class AppCoordinator {
     }
 
     private func clearSubscription() async {
-        if mihomo.isSystemProxyEnabled() {
-            safelySetProxy(enabled: false)
-        }
-        await stopServices(clearProxyState: false)
+        await stopServices()
         appState.resetRuntime()
         settings.subscriptionURL = ""
     }
 
-    private func stopServices(clearProxyState: Bool) async {
-        if clearProxyState {
-            safelySetProxy(enabled: false)
-        }
+    private func stopServices() async {
         if mihomo.isRunning {
             mihomo.stop()
         }
@@ -189,7 +193,6 @@ final class AppCoordinator {
 
     func prepareForQuit() {
         if mihomo.isRunning {
-            safelySetProxy(enabled: false)
             mihomo.stop()
         }
         proxy.reset()

@@ -33,7 +33,7 @@ final class FakeConfigManager: ConfigManagerProtocol {
     var runtimeConfigFileExists: Bool { true }
     func prepareRuntimeConfigFile() async throws -> URL { runtimeConfigFile }
     func downloadAndValidateConfig(url: String, retryCount: Int) async throws -> URL { runtimeConfigFile }
-    func parseProxyGroupsOrder() -> [(name: String, proxies: [String])] { [] }
+    func parseProxyGroupsOrder() -> [String] { [] }
 }
 
 @MainActor

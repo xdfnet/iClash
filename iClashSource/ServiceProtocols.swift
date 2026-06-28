@@ -18,7 +18,7 @@ protocol ConfigManagerProtocol {
 
     func prepareRuntimeConfigFile() async throws -> URL
     func downloadAndValidateConfig(url: String, retryCount: Int) async throws -> URL
-    func parseProxyGroupsOrder() -> [(name: String, proxies: [String])]
+    func parseProxyGroupsOrder() -> [String]
 }
 
 extension ConfigManagerProtocol {

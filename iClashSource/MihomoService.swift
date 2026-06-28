@@ -31,7 +31,6 @@ final class MihomoService: ObservableObject {
         guard !isRunning else { return }
 
         try cleanupStaleProcesses()
-        try disableSystemProxyIfNeeded()
 
         let configUrl = try await configManager.prepareRuntimeConfigFile()
         let mihomoPath = try getMihomoPath()
@@ -256,15 +255,6 @@ final class MihomoService: ObservableObject {
         recentOutput = String(combined.suffix(2_000))
     }
 
-    private func disableSystemProxyIfNeeded() throws {
-        do {
-            try setSystemProxy(enabled: false)
-        } catch {
-            logger.error("Failed to clear stale system proxy before startup: \(error.localizedDescription, privacy: .public)")
-            throw error
-        }
-    }
-
     private func cleanupStaleProcesses() throws {
         for port in [apiPort, mixedPort] {
             let task = Process()
@@ -336,20 +326,13 @@ final class MihomoService: ObservableObject {
 
     private func handleProcessTermination() {
         let wasRunning = isRunning
-        // 保存代理状态（关代理前拍快照）
-        let proxyWasEnabled = isSystemProxyEnabled()
         process = nil
         apiUrl = nil
 
         if wasRunning {
-            try? setSystemProxy(enabled: false)
             if !isStoppingNormally {
                 logger.error("mihomo crashed unexpectedly")
-                NotificationCenter.default.post(
-                    name: .mihomoCrashed,
-                    object: nil,
-                    userInfo: ["wasProxyEnabled": proxyWasEnabled]
-                )
+                NotificationCenter.default.post(name: .mihomoCrashed, object: nil)
             }
         }
         isStoppingNormally = false

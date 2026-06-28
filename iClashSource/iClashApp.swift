@@ -134,14 +134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleMihomoCrashed(_ notification: Notification) {
-        let wasProxyEnabled = (notification.userInfo?["wasProxyEnabled"] as? Bool) ?? false
-
         Task {
             do {
                 try await mihomoService.start()
-                if wasProxyEnabled {
-                    try mihomoService.setSystemProxy(enabled: true)
-                }
                 async let _ = mihomoService.fetchKernelVersion()
                 async let _ = ProxyManager.shared.refreshProxyList()
                 _ = await ((), ())

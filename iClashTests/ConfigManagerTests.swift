@@ -5,117 +5,97 @@ import XCTest
 final class ConfigManagerTests: XCTestCase {
     private let configManager = ConfigManager.shared
 
-    func testNormalizeSubscriptionContentConvertsAnyTLSURIList() throws {
-        let subscription = [
-            "anytls://password1@hk.example.com:443?sni=cdn.example.com#HK-1",
-            "anytls://password2@jp.example.com:8443#JP-1"
-        ].joined(separator: "\n")
+    private let uriList = """
+    anytls://password@hk.example.com:443?sni=cdn.example.com#HK-1
+    anytls://password@jp.example.com:8443#JP-1
+    """
 
-        let output = try configManager.normalizeSubscriptionContent(subscription)
+    private let yamlConfig = """
+    mixed-port: 7890
+    proxies:
+      - name: test
+        type: ss
+        server: example.com
+        port: 8443
+        password: secret
+    """
 
-        XCTAssertTrue(output.contains("type: anytls"))
-        XCTAssertTrue(output.contains("name: 'HK-1'"))
-        XCTAssertTrue(output.contains("server: 'hk.example.com'"))
-        XCTAssertTrue(output.contains("sni: 'cdn.example.com'"))
-        XCTAssertTrue(output.contains("name: 'JP-1'"))
-        // 默认 udp: true
-        XCTAssertTrue(output.contains("udp: true"))
+    override func setUp() {
+        super.setUp()
+        // 清理 provider 文件
+        let providerPath = configManager.configDirectory
+            .appendingPathComponent("providers.txt")
+        try? FileManager.default.removeItem(at: providerPath)
     }
 
-    func testAnyTLSWithFlowAndUDPOverride() throws {
-        let subscription = [
-            "anytls://password@sg.example.com:443?flow=xtls-rprx-vision&udp=false&sni=cloud.sg.example.com#SG"
-        ].joined(separator: "\n")
+    // MARK: - URI 列表 → proxy-providers
 
-        let output = try configManager.normalizeSubscriptionContent(subscription)
+    func testNormalizeURIListGeneratesProxyProvidersConfig() throws {
+        let output = try configManager.normalizeSubscriptionContent(uriList)
 
-        XCTAssertTrue(output.contains("flow: 'xtls-rprx-vision'"))
-        XCTAssertTrue(output.contains("udp: false"))
-        XCTAssertTrue(output.contains("sni: 'cloud.sg.example.com'"))
-        XCTAssertTrue(output.contains("name: 'SG'"))
+        // 包含 baseConfig 中的关键字段
+        XCTAssertTrue(output.contains("mixed-port: 7890"))
+        XCTAssertTrue(output.contains("dns:"))
+
+        // 包含 proxy-providers 定义
+        XCTAssertTrue(output.contains("proxy-providers:"))
+        XCTAssertTrue(output.contains("mysub:"))
+        XCTAssertTrue(output.contains("type: file"))
+        XCTAssertTrue(output.contains("path: providers.txt"))
+
+        // 包含 proxy-groups 使用 use 引用 provider
+        XCTAssertTrue(output.contains("use: [mysub]"))
+        XCTAssertTrue(output.contains("name: BoostNet"))
+        XCTAssertTrue(output.contains("name: 自动选择"))
+        XCTAssertTrue(output.contains("name: 故障转移"))
+
+        // 包含 rules
+        XCTAssertTrue(output.contains("rules:"))
+        XCTAssertTrue(output.contains("GEOIP,CN,DIRECT"))
     }
 
-    func testAnyTLSWithSpecialCharsInPassword() throws {
-        // 密码包含 @ : / 等特殊字符
-        let subscription = [
-            "anytls://p%40ss%3Aword%2Ftest@special.example.com:443?sni=test.example.com#SpecialPass"
-        ].joined(separator: "\n")
+    func testNormalizeURIListSavesProviderFile() throws {
+        _ = try configManager.normalizeSubscriptionContent(uriList)
 
-        let output = try configManager.normalizeSubscriptionContent(subscription)
+        let providerPath = configManager.configDirectory
+            .appendingPathComponent("providers.txt")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: providerPath.path))
 
-        XCTAssertTrue(output.contains("name: 'SpecialPass'"))
-        // 解码后的密码: p@ss:word/test
-        XCTAssertTrue(output.contains("password: 'p@ss:word/test'"))
+        let saved = try String(contentsOf: providerPath, encoding: .utf8)
+        XCTAssertEqual(saved.trimmingCharacters(in: .whitespacesAndNewlines), uriList)
     }
 
-    func testAnyTLSWithoutFragmentUsesDefaultName() throws {
-        let subscription = [
-            "anytls://mypassword@us.example.com:443?sni=us.example.com"
-        ].joined(separator: "\n")
+    // MARK: - YAML 直通
 
-        let output = try configManager.normalizeSubscriptionContent(subscription)
+    func testNormalizeYAMLConfigPassThrough() throws {
+        let output = try configManager.normalizeSubscriptionContent(yamlConfig)
 
-        // 没有 #fragment 时 name 应为 Unknown
-        XCTAssertTrue(output.contains("name: 'Unknown'"))
+        // 直通，不做任何转换
+        XCTAssertEqual(output, yamlConfig)
     }
 
-    func testAnyTLSInsecureOn() throws {
-        let subscription = [
-            "anytls://password@insecure.example.com:443?insecure=1#InsecureNode"
-        ].joined(separator: "\n")
+    func testNormalizeYAMLConfigDoesNotCreateProviderFile() throws {
+        _ = try configManager.normalizeSubscriptionContent(yamlConfig)
 
-        let output = try configManager.normalizeSubscriptionContent(subscription)
-
-        XCTAssertTrue(output.contains("skip-cert-verify: true"))
+        let providerPath = configManager.configDirectory
+            .appendingPathComponent("providers.txt")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: providerPath.path))
     }
 
-    func testAnyTLSMissingPasswordThrows() throws {
-        let subscription = "anytls://@host.com:443?sni=test#NoPass"
-        XCTAssertThrowsError(try configManager.normalizeSubscriptionContent(subscription))
+    // MARK: - 空的/无效内容
+
+    func testNormalizeEmptyContentReturnsEmpty() throws {
+        let output = try configManager.normalizeSubscriptionContent("")
+        XCTAssertEqual(output, "")
     }
 
-    func testAnyTLSUDPExplicitTrue() throws {
-        let subscription = [
-            "anytls://password@udp-on.example.com:443?udp=yes#UDPOn"
-        ].joined(separator: "\n")
-
-        let output = try configManager.normalizeSubscriptionContent(subscription)
-
-        XCTAssertTrue(output.contains("udp: true"))
-    }
-
-    func testAnyTLSUDPExplicitFalse() throws {
-        let subscription = [
-            "anytls://password@udp-off.example.com:443?udp=0#UDPOff"
-        ].joined(separator: "\n")
-
-        let output = try configManager.normalizeSubscriptionContent(subscription)
-
-        XCTAssertTrue(output.contains("udp: false"))
-    }
-
-    func testNormalizeSubscriptionContentConvertsShadowsocksURIListWithCipher() throws {
-        let subscription = [
-            "ss://YWVzLTI1Ni1nY206c2VjcmV0QDEyNy4wLjAuMTo4Mzg4#SS-1"
-        ].joined(separator: "\n")
-
-        let output = try configManager.normalizeSubscriptionContent(subscription)
-
-        XCTAssertTrue(output.contains("type: ss"))
-        XCTAssertTrue(output.contains("cipher: 'aes-256-gcm'"))
-        XCTAssertTrue(output.contains("password: 'secret'"))
-        XCTAssertTrue(output.contains("server: '127.0.0.1'"))
-        XCTAssertTrue(output.contains("port: 8388"))
-    }
-
-    func testNormalizeSubscriptionContentRejectsUnsupportedProxyScheme() {
-        let subscription = "vmess://eyJhZGQiOiJ2bWVzcy5leGFtcGxlLmNvbSJ9"
-
-        XCTAssertThrowsError(try configManager.normalizeSubscriptionContent(subscription)) { error in
-            guard case ConfigError.unsupportedProxySchemes(let schemes) = error else {
-                return XCTFail("Unexpected error: \(error)")
-            }
-            XCTAssertEqual(schemes, ["vmess"])
-        }
+    func testNormalizeMixedContentPassesThrough() throws {
+        // 混合内容（非纯 URI）作为 configFile 直通
+        let mixed = """
+        anytls://password@host:443#test
+        mixed-port: 7890
+        """
+        let output = try configManager.normalizeSubscriptionContent(mixed)
+        XCTAssertEqual(output, mixed)
     }
 }
