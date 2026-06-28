@@ -232,23 +232,38 @@ final class AppCoordinator {
 
 // MARK: - DaemonLogger
 
-/// 守护日志 — 记录关键操作和结果到 daemon.log，方便排查问题
+/// 守护日志 — 记录关键操作和结果
+///
+/// 同时输出到：
+/// - `~/.config/iclash/daemon.log`（文件日志，便于事后排查，自动滚动）
+/// - macOS Unified Logging（通过 `OSLog`），可用 `Console.app` 或 `log show` 查看
 @MainActor
 struct DaemonLogger {
     static let shared = DaemonLogger()
 
+    /// 单个日志文件最大字节数（1 MB）；超过即触发滚动
+    private static let maxFileSize: UInt64 = 1_048_576
+    /// 最多保留 1 个历史归档文件（daemon.log.1）
+    private static let maxArchivedFiles = 1
+
     private let logFile: URL
+    private let archiveFile: URL
     private let dateFormatter: DateFormatter
+    private let osLog: os.Logger
     private let fileHandleQueue = DispatchQueue(label: "com.iclash.daemon-log")
+    private let fileManager = FileManager.default
 
     private init() {
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let home = fileManager.homeDirectoryForCurrentUser
         logFile = home.appendingPathComponent(".config/iclash/daemon.log")
+        archiveFile = home.appendingPathComponent(".config/iclash/daemon.log.1")
 
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd HH:mm:ss"
         df.locale = Locale(identifier: "zh_CN")
         dateFormatter = df
+
+        osLog = os.Logger(subsystem: "com.iclash.macos", category: "daemon")
     }
 
     /// 追加一条日志，自动带时间戳和换行
@@ -259,26 +274,62 @@ struct DaemonLogger {
         guard let data = line.data(using: .utf8) else { return }
 
         fileHandleQueue.sync {
-            if !FileManager.default.fileExists(atPath: logFile.path) {
-                FileManager.default.createFile(atPath: logFile.path, contents: nil)
-            }
-            guard let handle = FileHandle(forWritingAtPath: logFile.path) else { return }
-            defer { try? handle.close() }
-            try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
+            writeToFile(data)
         }
+
+        // 镜像到 Unified Logging（不阻塞 I/O）
+        osLog.info("\(line, privacy: .public)")
     }
 
-    /// 读取全部日志
+    /// 读取全部日志（主文件 + 归档文件）
     func readAll() -> String {
-        guard let data = try? Data(contentsOf: logFile) else { return "" }
-        return String(decoding: data, as: UTF8.self)
+        let archived = (try? String(contentsOf: archiveFile, encoding: .utf8)) ?? ""
+        let current = (try? String(contentsOf: logFile, encoding: .utf8)) ?? ""
+        return archived + current
     }
 
     /// 清空日志
     func clear() {
         fileHandleQueue.sync {
             try? "".data(using: .utf8)?.write(to: logFile)
+            try? fileManager.removeItem(at: archiveFile)
         }
+    }
+
+    /// 测试可见：返回日志文件路径
+    var logFileURL: URL { logFile }
+
+    // MARK: - 私有
+
+    private func writeToFile(_ data: Data) {
+        ensureLogFileExists()
+
+        guard let handle = try? FileHandle(forWritingTo: logFile) else { return }
+        defer { try? handle.close() }
+
+        do {
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data)
+        } catch {
+            return
+        }
+
+        rotateIfNeeded()
+    }
+
+    private func ensureLogFileExists() {
+        if !fileManager.fileExists(atPath: logFile.path) {
+            fileManager.createFile(atPath: logFile.path, contents: nil)
+        }
+    }
+
+    /// 当日志文件超过 maxFileSize 时归档旧文件，新建空文件
+    private func rotateIfNeeded() {
+        let size = (try? fileManager.attributesOfItem(atPath: logFile.path)[.size] as? UInt64) ?? 0
+        guard size > Self.maxFileSize else { return }
+
+        try? fileManager.removeItem(at: archiveFile)
+        try? fileManager.moveItem(at: logFile, to: archiveFile)
+        fileManager.createFile(atPath: logFile.path, contents: nil)
     }
 }

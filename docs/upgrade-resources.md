@@ -9,7 +9,7 @@ iClash 在 `iClashSource/Resources/` 下内置了两个外部资源文件，随 
 | `mihomo` | `iClashSource/Resources/mihomo` | 代理内核二进制 |
 | `Country.mmdb` | `iClashSource/Resources/Country.mmdb` | GeoIP 数据库（GEOIP 规则分流用） |
 
-运行时会从 Bundle 直接读取（`mihomo` 从 Bundle 路径启动，`Country.mmdb` 通过符号链接触达），无需额外拷贝。
+**启动时自动引导**：应用首次启动时，`ConfigManager.init()` 会将两个资源从 Bundle 复制到 `~/.config/iclash/`。之后 app 只使用 config 目录中的版本，Bundle 不再被读取。config 目录中的文件损坏时（如 mihomo 失去可执行权限、Country.mmdb 大小 < 1MB），会自动从 Bundle 重新复制修复。
 
 ## 一键更新
 

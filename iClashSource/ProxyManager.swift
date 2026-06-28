@@ -2,8 +2,12 @@ import Foundation
 import os.log
 
 /// 代理管理器 - 负责代理列表缓存和选择逻辑
+///
+/// 依赖通过构造器注入（便于测试替换）：
+/// - `mihomo`: 内核进程服务（MihomoServiceProtocol）
+/// - `config`: 配置管理器（ConfigManagerProtocol）
 @MainActor
-final class ProxyManager {
+final class ProxyManager: ProxyManagerProtocol {
     static let shared = ProxyManager()
 
     private let logger = Logger(subsystem: "com.iclash.macos", category: "ProxyManager")
@@ -15,14 +19,20 @@ final class ProxyManager {
     private var lastRefreshTime: Date?
     private let cacheValidDuration: TimeInterval = 2.0
 
-    private let mihomoService = MihomoService.shared
-    private let configManager = ConfigManager.shared
+    private let mihomo: any MihomoServiceProtocol
+    private let config: any ConfigManagerProtocol
 
-    private init() {}
+    weak var delegate: ProxyManagerDelegate?
 
-    /// 刷新代理列表（不自动启动内核）
+    init(mihomo: any MihomoServiceProtocol = MihomoService.shared,
+         config: any ConfigManagerProtocol = ConfigManager.shared) {
+        self.mihomo = mihomo
+        self.config = config
+    }
+
+    /// 刷新代理列表（不自动启动内核），完成后通知 delegate
     func refreshProxyList() async {
-        guard mihomoService.isRunning else { return }
+        guard mihomo.isRunning else { return }
         if isLoading { return }
         if let lastTime = lastRefreshTime,
            Date().timeIntervalSince(lastTime) < cacheValidDuration,
@@ -31,12 +41,11 @@ final class ProxyManager {
         isLoading = true
 
         do {
-            let proxies = try await mihomoService.fetchProxies()
-            let groupOrder = configManager.parseProxyGroupsOrder()
+            let proxies = try await mihomo.fetchProxies()
+            let groupOrder = config.parseProxyGroupsOrder()
             var groups: [(name: String, proxies: [String])] = []
             var selections: [String: String] = [:]
 
-            // 按配置中的 group 顺序构建，代理列表从 API 响应获取
             for groupName in groupOrder {
                 if let info = proxies[groupName] {
                     let proxyList = info.all ?? []
@@ -55,11 +64,12 @@ final class ProxyManager {
         }
 
         isLoading = false
+        delegate?.proxyManagerDidRefresh(self)
     }
 
     /// 选择代理
     func selectProxy(name: String, in group: String) async throws {
-        try await mihomoService.selectProxy(name: name, in: group)
+        try await mihomo.selectProxy(name: name, in: group)
         currentSelections[group] = name
     }
 
@@ -80,4 +90,12 @@ final class ProxyManager {
         lastRefreshTime = nil
         isLoading = false
     }
+}
+
+// MARK: - Delegate
+
+/// 当代理列表刷新完成时通知（用于触发菜单重建）
+@MainActor
+protocol ProxyManagerDelegate: AnyObject {
+    func proxyManagerDidRefresh(_ manager: ProxyManager)
 }

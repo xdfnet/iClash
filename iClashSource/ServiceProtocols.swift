@@ -63,7 +63,6 @@ protocol KernelServiceControlling: AnyObject {
 
 extension MihomoService: MihomoServiceProtocol {}
 extension ConfigManager: ConfigManagerProtocol {}
-extension ProxyManager: ProxyManagerProtocol {}
 extension AppSettings: AppSettingsProtocol {}
 
 // MARK: - 通知

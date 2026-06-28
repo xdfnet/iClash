@@ -32,7 +32,7 @@ final class FakeConfigManager: ConfigManagerProtocol {
     var runtimeConfigFile: URL { configDirectory.appendingPathComponent("config.yaml") }
     var runtimeConfigFileExists: Bool { true }
     func prepareRuntimeConfigFile() async throws -> URL { runtimeConfigFile }
-    func downloadAndValidateConfig(url: String, retryCount: Int) async throws -> URL { runtimeConfigFile }
+    func downloadIfChanged(url: String, retryCount: Int) async throws -> Bool { true }
     func parseProxyGroupsOrder() -> [String] { [] }
 }
 

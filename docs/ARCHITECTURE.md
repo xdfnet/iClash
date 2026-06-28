@@ -7,12 +7,16 @@ iClash 是一个纯菜单栏 macOS 代理客户端。应用本身只负责编排
 ```
 ┌─────────────────────────────────────────┐
 │              iClash (UI)                │
-│  MenuController  ←→  AppCoordinator    │
+│  MenuController  ←→  AppCoordinator      │
 │                          │              │
 │   ┌──────────────────────┼──────────┐   │
-│   │    Service Layer      │          │   │
-│   │  ConfigManager  MihomoService    │   │
-│   │  ProxyManager  AppSettings       │   │
+│   │    Service Layer       │          │   │
+│   │  ConfigManager         │          │   │
+│   │  MihomoService         │          │   │
+│   │    ├ MihomoAPIClient  │          │   │
+│   │    └ NetworkServiceMgr │          │   │
+│   │  ProxyManager          │          │   │
+│   │  AppSettings           │          │   │
 │   └──────────────────────┼──────────┘   │
 │                          │              │
 └──────────────────────────┼──────────────┘
@@ -37,7 +41,7 @@ iClash 是一个纯菜单栏 macOS 代理客户端。应用本身只负责编排
 | 组件 | 职责 | 文件 |
 |------|------|------|
 | `iClashApp` | SwiftUI App 入口，声明 Settings Scene | iClashApp.swift |
-| `AppDelegate` | 菜单栏图标管理、通知分发、MenuControllerDelegate | iClashApp.swift |
+| `AppDelegate` | 菜单栏图标管理、通知分发、MenuControllerDelegate、ProxyManagerDelegate | iClashApp.swift |
 | `AppCoordinator` | 服务编排：启动/停止/订阅/代理切换 | AppArchitecture.swift |
 | `AppState` | 全局单例状态，@Observable，SSOT | AppArchitecture.swift |
 | `MenuController` | NSMenu 构建、NSMenuDelegate | MenuController.swift |
@@ -48,9 +52,12 @@ iClash 是一个纯菜单栏 macOS 代理客户端。应用本身只负责编排
 
 | 协议 | 实现 | 职责 |
 |------|------|------|
-| `MihomoServiceProtocol` | `MihomoService` | 内核进程生命周期、系统代理控制、API 通信 |
-| `ConfigManagerProtocol` | `ConfigManager` | 订阅下载、内容识别、运行时配置生成 |
-| `ProxyManagerProtocol` | `ProxyManager` | 代理列表缓存、节点选择 |
+| `MihomoServiceProtocol` | `MihomoService` | 内核进程生命周期管理 |
+| `KernelServiceControlling` | `MihomoService` | 系统代理控制（由 `NetworkServiceManager` 实现） |
+| `MihomoAPIClient` | （struct，通过 `MihomoService` 调用） | Mihomo REST API 调用（/proxies, /version） |
+| `NetworkServiceManager` | （singleton，被 `MihomoService` 持有） | `networksetup` CLI 封装（系统代理设置/查询） |
+| `ConfigManagerProtocol` | `ConfigManager` | 订阅下载、格式识别、运行时配置生成 |
+| `ProxyManagerProtocol` | `ProxyManager` | 代理列表缓存（2s）、节点选择；支持 delegate 回调 |
 | `AppSettingsProtocol` | `AppSettings` | UserDefaults 存取 |
 
 ### 3. 数据模型
@@ -67,6 +74,11 @@ iClash 是一个纯菜单栏 macOS 代理客户端。应用本身只负责编排
 ### 订阅 → 内核启动
 
 ```
+应用启动
+  └─ ConfigManager.init()                  ← 同时初始化 Country.mmdb + mihomo
+       ├─ ensureGeoIPExists()            → ~/.config/iclash/Country.mmdb
+       └─ ensureKernelExists()            → ~/.config/iclash/mihomo
+
 用户输入订阅 URL
        │
        ▼
@@ -77,35 +89,37 @@ AppDelegate.subscriptionSettingsDidSave()
        │
        ▼
 AppCoordinator.applySubscription(url)
-  ├─ downloadAndValidateConfig(url)    下载+识别格式
+  ├─ downloadIfChanged(url)              下载+识别格式（5MB 上限）
   │    ├─ Base64? → 解码
   │    ├─ URI列表? → 保存 providers.txt，生成 proxy-providers 配置
-  │    └─ 已有 YAML? → 直接使用
+  │    └─ YAML? → 直接使用
   │    └─ 写入 ~/.config/iclash/config.yaml
   ├─ mihomo.start()
-  │    ├─ cleanupStaleProcesses()      lsof 清理残留
-  │    ├─ prepareRuntimeConfigFile()   文件已存在则跳过
-  │    ├─ process.run()                启动内核进程
-  │    └─ 轮询 3s 确认进程存活
+  │    ├─ cleanupStaleProcesses()        lsof 清理残留
+  │    ├─ prepareRuntimeConfigFile()    文件已存在则跳过
+  │    ├─ process.run()                 启动内核进程
+  │    └─ API 探测 (/version) 确认就绪
   ├─ fetchKernelVersion() + refreshProxyList()  并行
-  └─ syncFromServices()                同步 AppState
+  └─ syncFromServices()                  同步 AppState
 ```
 
 ### 菜单打开 → 状态刷新
 
 ```
 menuWillOpen()
-  ├─ isSystemProxyEnabled()            实时查询 (networksetup)
-  ├─ isRunning                         读 MihomoService 属性
-  ├─ rebuildMenu()                     用最新状态构建菜单
-  └─ Task { refreshProxyList() }       后台刷新代理列表
+  ├─ isSystemProxyEnabled()              实时查询 (NetworkServiceManager)
+  ├─ isRunning                          读 MihomoService 属性
+  ├─ rebuildMenu()                      用最新状态构建菜单
+  └─ Task { proxy.refreshProxyList() }   后台刷新代理列表
+       └─ 完成时 → ProxyManagerDelegate → AppDelegate
+            └─ syncUI()                  重建菜单（节点列表更新）
 ```
 
 ### 代理切换
 
 ```
 用户点击节点 → selectProxy(name, group)
-  └─ PUT /proxies/{group}  {name}     Mihomo API
+  └─ MihomoAPIClient.selectProxy()      PUT /proxies/{group}
   └─ appState.currentSelections 更新
 ```
 
@@ -139,6 +153,7 @@ final class AppState {
 - **订阅变更 → 完整同步**：`syncFromServices()` 一次同步所有字段
 - **菜单打开 → 部分同步**：只查 `isProxyEnabled` + `isRunning`（实时性要求高）
 - **代理切换 → 局部更新**：只写 `currentSelections`
+- **后台刷新完成 → 菜单重建**：`ProxyManagerDelegate.proxyManagerDidRefresh()` 回调触发
 
 ## 服务协议层
 
@@ -164,12 +179,21 @@ init(
 )
 ```
 
+`ProxyManager` 同样接受构造器注入：
+
+```swift
+init(mihomo: any MihomoServiceProtocol = MihomoService.shared,
+     config: any ConfigManagerProtocol = ConfigManager.shared)
+```
+
 ## 并发模型
 
 所有 UI 和服务代码运行在 `@MainActor` 上，消除数据竞争：
 
 - `AppState` → `@MainActor`
 - `MihomoService` → `@MainActor`
+- `MihomoAPIClient` → `@MainActor` (struct)
+- `NetworkServiceManager` → `@MainActor`
 - `AppCoordinator` → `@MainActor`
 - `MenuController` → `@MainActor`
 
@@ -179,40 +203,41 @@ init(
 
 ```
 Bundle (iClash.app)
-├── Contents/Resources/mihomo          ← 可执行文件，直接运行
-├── Contents/Resources/Country.mmdb    ← GeoIP 数据库
+├── Contents/Resources/mihomo          ← 内核二进制（启动时复制到 config）
+├── Contents/Resources/Country.mmdb      ← GeoIP 数据库（启动时复制到 config）
 └── Contents/Resources/Assets.xcassets
 
-~/.config/iclash/                      ← 运行时目录
-├── config.yaml                        ← 运行时配置（proxy-providers 框架）
-├── providers.txt                      ← 订阅 URI 列表（Mihomo 原生解析）
-├── Country.mmdb ──符号链接──→ Bundle   ← 通过软链访问，不占额外空间
-└── run/                               ← mihomo 运行时文件
+~/.config/iclash/                        ← 运行时目录
+├── mihomo                              ← 内核二进制（从 Bundle 引导）
+├── Country.mmdb                        ← GeoIP 数据库（从 Bundle 引导，>1MB 损坏时自动修复）
+├── config.yaml                          ← 运行时配置（proxy-providers 框架）
+├── providers.txt                        ← 订阅 URI 列表（Mihomo 原生解析）
+└── daemon.log                          ← 操作日志（1MB 滚动，保留一个归档）
 ```
 
-- `mihomo` 二进制直接从 Bundle 路径启动
-- `Country.mmdb` 通过符号链接从 Bundle 引用，首次启动时在 `~/.config/iclash/` 下创建
-- 检测到符号链接断裂（Bundle 路径变更/App 重装）时自动重建
+启动时 `ConfigManager.init()` 同时初始化两个资源文件：
+- `ensureKernelExists()` — mihomo 从 Bundle 复制到 config，损坏时自动从 Bundle 修复
+- `ensureGeoIPExists()` — Country.mmdb 从 Bundle 复制到 config，大小 < 1MB 时自动修复
 
 ## 系统代理控制
 
-通过 `/usr/sbin/networksetup` CLI 控制 macOS 系统代理：
+通过 `NetworkServiceManager` 封装 `/usr/sbin/networksetup` CLI：
 
 | 操作 | 命令 |
 |------|------|
-| 启用 | `-setsocksfirewallproxy <service> 127.0.0.1 7890` + `-setsocksfirewallproxystate on` |
-| 禁用 | `-setsocksfirewallproxystate <service> off` |
-| 查询 | `-getsocksfirewallproxy <service>` |
+| 启用 | `-setwebproxy` + `-setwebproxystate` + `-setsecurewebproxy` + `-setsocksfirewallproxy` |
+| 禁用 | `-setwebproxystate off` + `-setsecurewebproxystate off` + `-setsocksfirewallproxystate off` |
+| 查询 | `-getwebproxy` |
 
-- 自动枚举所有活跃网络服务
+- 自动枚举所有活跃网络服务（Wi-Fi、Ethernet 等）
 - app 不管理代理状态，仅菜单点击时开/关，打开菜单时读取真实状态
 
 ## 崩溃恢复
 
 ```
 进程终止 → terminationHandler
-  ├─ 正常 stop() → isStoppingNormally = true → 跳过
-  └─ 崩溃 → isStoppingNormally = false
+  ├─ .exit (正常停止) → 静默，不触发重启
+  └─ .uncaughtSignal (崩溃)
        └─ post(.mihomoCrashed)    通知自动重启内核
 ```
 
@@ -225,3 +250,24 @@ Bundle (iClash.app)
 | YAML 配置 | 包含 `proxies:` 或 `rules:` | 直接使用 |
 
 URI 列表无需 app 解析，由 Mihomo `proxy-providers` 原生处理，支持 all supported protocols (anytls, ss, vmess, trojan, vless, hysteria2, tuic, etc.)
+
+## 订阅大小保护
+
+订阅内容经过三层大小校验：
+1. 响应头 `Content-Length` 预检（超过 5 MB 直接拒绝）
+2. 实际接收字节数校验
+3. Base64 解码后字节数校验
+
+## 日志系统
+
+`DaemonLogger` 同时输出到：
+- `~/.config/iclash/daemon.log`（文件日志，1MB 自动滚动，保留 `daemon.log.1`）
+- macOS Unified Logging（通过 `OSLog`，可用 Console.app 或 `log show` 查看）
+
+```bash
+# 实时查看日志
+log stream --predicate 'subsystem == "com.iclash.macos"' --style syslog
+
+# 查看历史日志
+log show --predicate 'subsystem == "com.iclash.macos"' --style syslog --last 1h
+```

@@ -159,6 +159,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) {
+        // 菜单关闭后自动清除错误信息（下次打开时如有新错误会重新显示）
         appState.lastError = nil
     }
 }

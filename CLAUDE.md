@@ -82,18 +82,16 @@ xcodebuild -project iClash.xcodeproj -scheme iClash -destination 'platform=macOS
 | 组件 | 文件 | 职责 |
 |------|------|------|
 | `iClashApp` | `iClashApp.swift` | SwiftUI App 入口 + `@main` |
-| `AppDelegate` | `iClashApp.swift` | 状态栏图标、菜单 Setup、事件分发 |
+| `AppDelegate` | `iClashApp.swift` | 状态栏图标、菜单 Setup、事件分发、ProxyManagerDelegate |
 | `MenuController` | `MenuController.swift` | 从 AppState 构建 NSMenu，通过 MenuControllerDelegate 回传操作 |
 | `AppCoordinator` | `AppArchitecture.swift` | **统一编排**所有服务的启动/停止/切换/更新流程 |
 | `AppState` | `AppArchitecture.swift` | `@Observable` 全局状态（SSOT），通过 `syncFromServices()` 同步 |
-| `MihomoService` | `MihomoService.swift` | 内核生命周期（启动/停止） + 系统 SOCKS 代理控制 + 内核 REST API 调用 |
-| `ConfigManager` | `ConfigManager.swift` | 订阅下载、Base64解码、URI解析、运行时 YAML 生成 |
-| `ProxyManager` | `ProxyManager.swift` | 代理列表缓存（2s 缓存有效期）、节点切换 |
+| `MihomoService` | `MihomoService.swift` | 内核进程生命周期（启动/停止/崩溃检测）、持有 NetworkServiceManager |
+| `MihomoAPIClient` | `MihomoAPIClient.swift` | **新增** Mihomo REST API 调用（/proxies、/version），纯 struct，无状态 |
+| `NetworkServiceManager` | `NetworkServiceManager.swift` | **新增** `networksetup` CLI 封装（系统代理设置/查询） |
+| `ConfigManager` | `ConfigManager.swift` | 订阅下载（5MB 上限）、Base64解码、URI解析、运行时 YAML 生成；init 时引导 mihomo + Country.mmdb 到 config 目录 |
+| `ProxyManager` | `ProxyManager.swift` | 代理列表缓存（2s 缓存有效期）、节点切换；支持 `ProxyManagerDelegate` 回调 |
 | `AppSettings` | `AppSettings.swift` | UserDefaults 封装（订阅地址、更新时间） |
-
-### 已删除的文件
-
-`KernelUpdater.swift` — 内核更新功能已移除。`KernelUpdateCoordinatorTests.swift`、`KernelUpdaterTests.swift` 同批删除。
 
 ### 架构关键模式
 
@@ -106,6 +104,13 @@ ServiceProtocols.swift → MihomoServiceProtocol, ConfigManagerProtocol,
                          KernelServiceControlling
 ```
 `TestHelpers.swift` 提供 `FakeKernelService`、`FakeConfigManager`、`FakeProxyManager`、`FakeAppSettings`。
+
+**2. MihomoService 拆分**
+
+原 527 行 `MihomoService` 拆分为三个职责单一的组件：
+- `MihomoService`：进程生命周期（启动/停止/崩溃检测/进程清理）
+- `MihomoAPIClient`：HTTP API 调用（`fetchProxies`/`selectProxy`/`fetchKernelVersion`），无状态 struct
+- `NetworkServiceManager`：`networksetup` CLI 封装（系统代理设置/查询）
 
 **2. AppCoordinator 编排模式**
 
@@ -127,12 +132,14 @@ Notification.Name:
                   ↓
               base64Decode()        // 自动检测并解码 Base64
                   ↓
-              normalizeSubscriptionContent()
+              generateConfigContent()
                   ↓
               ├── URI列表? → 保存 providers.txt + 生成 proxy-providers 配置
               │                (Mihomo 原生解析 URI，app 不做转译)
               └── 完整 YAML → 直通保存
 ```
+
+> **大小保护**：订阅内容经过 Content-Length 预检 + 实际接收校验 + Base64 解码后校验，三层保护拒绝 > 5MB 的订阅。
 
 ### 内核通信（REST API）
 
@@ -150,15 +157,19 @@ Mihomo 暴露 HTTP API `127.0.0.1:9090`：
 ### 内置资源
 
 - Mihomo 内核二进制（`iClashSource/Resources/mihomo`）
-- GeoIP 数据库（`Country.mmdb`，通过符号链接到 `~/.config/iclash/`）
+- GeoIP 数据库（`Country.mmdb`）
+
+**启动时引导**：应用首次启动时，`ConfigManager.init()` 同时初始化两个资源到 `~/.config/iclash/`。之后 app 只使用 config 目录中的版本，Bundle 不再被读取。损坏时（mihomo 失去可执行权限、Country.mmdb 大小 < 1MB）自动从 Bundle 重新复制修复。
 
 ## 测试
 
 - 框架：XCTest
 - 模式：Fake 测试替身（protocol-based，手动注入到 `AppCoordinator` / `MenuController`）
-- 单测覆盖：`AppSettingsTests`（UserDefaults 读写验证）、`ConfigManagerTests`（proxy-providers 生成）、`MenuControllerTests`（菜单构建状态）、`MihomoServiceTests`（内核文件解析）、`ProxyManagerTests`（缓存/重置逻辑）
-
-> **注意**：当前测试主要覆盖纯逻辑层（配置解析、菜单构建），核心集成测试（AppCoordinator 编排流程）尚未覆盖。
+- 总计 19 个测试，全部通过：
+  - `ProxyGroupsParserTests`（10）：YAML proxy-groups 解析器，覆盖 inline/block/混合/注释/边界
+  - `SubscriptionSizeLimitTests`（6）：订阅 5MB 大小校验
+  - `MihomoServiceTests`（3）：内核路径解析（优先 config/引导/修复）
+  - `AppSettingsTests`、`ProxyManagerTests`、`MenuControllerTests`：核心功能覆盖
 
 ## 构建说明
 
@@ -176,8 +187,11 @@ Mihomo 暴露 HTTP API `127.0.0.1:9090`：
 ```
 ~/.config/iclash/
 ├── config.yaml       # 运行时生成的 mihomo 配置
-├── run               # 内核运行时文件
-└── Country.mmdb      # GeoIP 数据库（符号链接到 Bundle 内资源）
+├── providers.txt     # 订阅 URI 列表
+├── mihomo            # 内核二进制（从 Bundle 引导，损坏时自动修复）
+├── Country.mmdb      # GeoIP 数据库（从 Bundle 引导，大小 <1MB 时自动修复）
+├── daemon.log        # 操作日志（1MB 滚动）
+└── daemon.log.1      # 历史归档
 ```
 ```
 ~/Library/Preferences/David.iClash.plist   # UserDefaults（订阅地址）
@@ -186,7 +200,7 @@ Mihomo 暴露 HTTP API `127.0.0.1:9090`：
 ## 代码风格
 
 - `@MainActor` 注解所有 UI 层类
-- 协议扩展提供默认参数值（如 `ConfigManagerProtocol.downloadAndValidateConfig(url:)` 默认重试 3 次）
-- 日志使用 `os.log.Logger`，category 按组件划分
+- 协议扩展提供默认参数值（如 `ConfigManagerProtocol.downloadIfChanged(url:)` 默认重试 3 次）
+- 日志使用 `os.log.Logger`，category 按组件划分；关键操作同时写入 `DaemonLogger` 文件日志
 - 错误类型统一使用 `LocalizedError` 枚举
 - 不引入第三方依赖，全部使用系统框架

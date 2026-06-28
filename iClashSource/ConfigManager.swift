@@ -19,6 +19,16 @@ final class ConfigManager {
     /// proxy-provider 文件名（相对 configDirectory）
     private static let providerFileName = "providers.txt"
 
+    /// 订阅内容最大字节数（5 MB）— 超过此大小视为异常，避免恶意订阅 OOM
+    static let maxSubscriptionBytes = 5 * 1_024 * 1_024
+
+    /// 校验订阅内容是否在允许大小内；越界时抛出 `ConfigError.subscriptionTooLarge`
+    static func validateSubscriptionSize(bytes: Int) throws {
+        guard bytes <= maxSubscriptionBytes else {
+            throw ConfigError.subscriptionTooLarge(declaredBytes: bytes)
+        }
+    }
+
     let configDirectory: URL
     let runtimeConfigFile: URL
 
@@ -51,30 +61,68 @@ final class ConfigManager {
         runtimeConfigFile = configDirectory.appendingPathComponent("config.yaml")
         try? createDirectoryIfNeeded()
         try? ensureGeoIPExists()
+        try? ensureKernelExists()
     }
 
-    /// 确保 GeoIP 数据库存在（从 Bundle 创建符号链接，不占用额外空间）
+    /// 确保 mihomo 内核存在于配置目录（从 Bundle 复制，损坏时自动修复）
+    ///
+    /// 与 Country.mmdb 同等对待：启动时即初始化到 config 目录，后续只使用 config 版本。
+    private func ensureKernelExists() throws {
+        let fm = FileManager.default
+        let kernelPath = configDirectory.appendingPathComponent("mihomo")
+        let bundleKernel = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/mihomo")
+
+        guard fm.fileExists(atPath: bundleKernel.path) else { return }
+
+        let needsCopy: Bool
+        if fm.fileExists(atPath: kernelPath.path) {
+            // 检查是否可执行（被破坏则重新复制）
+            if !fm.isExecutableFile(atPath: kernelPath.path) {
+                needsCopy = true
+                try? fm.removeItem(at: kernelPath)
+            } else {
+                needsCopy = false
+            }
+        } else {
+            needsCopy = true
+        }
+
+        if needsCopy {
+            try? fm.copyItem(at: bundleKernel, to: kernelPath)
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: kernelPath.path)
+        }
+    }
+
+    /// 确保 GeoIP 数据库存在于配置目录（从 Bundle 复制，不依赖符号链接）
+    ///
+    /// 行为：
+    /// - 配置目录中无 Country.mmdb → 从 Bundle 复制
+    /// - 配置目录中已有但文件大小异常（< 1MB，正常应 > 1MB）→ 重新复制（修复损坏）
+    /// - Bundle 中无 Country.mmdb → 跳过（降级，不影响主流程）
     private func ensureGeoIPExists() throws {
         let geoipPath = configDirectory.appendingPathComponent("Country.mmdb")
         let fileManager = FileManager.default
-
-        if fileManager.fileExists(atPath: geoipPath.path) {
-            let resourceValues = try? geoipPath.resourceValues(forKeys: [.isSymbolicLinkKey])
-            if resourceValues?.isSymbolicLink == true {
-                let realPath = try fileManager.destinationOfSymbolicLink(atPath: geoipPath.path)
-                if !fileManager.fileExists(atPath: realPath) {
-                    try fileManager.removeItem(at: geoipPath)
-                }
-            }
-        }
-
-        guard !fileManager.fileExists(atPath: geoipPath.path) else { return }
 
         guard let resourcePath = Bundle.main.resourceURL else { return }
         let bundleGeoIP = resourcePath.appendingPathComponent("Country.mmdb")
         guard fileManager.fileExists(atPath: bundleGeoIP.path) else { return }
 
-        try fileManager.createSymbolicLink(at: geoipPath, withDestinationURL: bundleGeoIP)
+        let needsCopy: Bool
+        if fileManager.fileExists(atPath: geoipPath.path) {
+            // 文件存在时，检查大小是否正常（GeoIP 通常 > 1MB）
+            let attrs = try? fileManager.attributesOfItem(atPath: geoipPath.path)
+            let size = attrs?[.size] as? UInt64 ?? 0
+            needsCopy = size < 1_048_576
+            if needsCopy {
+                try? fileManager.removeItem(at: geoipPath)
+            }
+        } else {
+            needsCopy = true
+        }
+
+        if needsCopy {
+            try fileManager.copyItem(at: bundleGeoIP, to: geoipPath)
+        }
     }
 
     /// 获取运行时配置文件路径（文件已存在时跳过下载）
@@ -144,6 +192,10 @@ final class ConfigManager {
     }
 
     /// 下载订阅内容并验证
+    ///
+    /// 大小保护：
+    /// - 若响应头声明 `Content-Length` 超过上限，直接拒绝（避免下载大文件被 OOM）
+    /// - 通过 URLSessionConfiguration 的 `httpMaximumConnectionsPerHost`/timeout 间接保护
     private func downloadSubscriptionContent(from urlString: String) async throws -> String {
         guard let subscriptionURL = URL(string: urlString) else {
             throw ConfigError.invalidSubscriptionURL
@@ -165,11 +217,19 @@ final class ConfigManager {
         }
 
         if let httpResponse = response as? HTTPURLResponse {
+            // 优先根据响应头提前拒绝，避免下载大文件
+            if let contentLength = httpResponse.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init) {
+                try Self.validateSubscriptionSize(bytes: contentLength)
+            }
+
             logger.info("Subscription response status: \(httpResponse.statusCode), bytes: \(data.count)")
             guard (200...299).contains(httpResponse.statusCode) else {
                 throw ConfigError.invalidResponse(statusCode: httpResponse.statusCode)
             }
         }
+
+        // 二次校验：实际接收字节也必须在限制内
+        try Self.validateSubscriptionSize(bytes: data.count)
 
         guard !data.isEmpty else {
             throw ConfigError.emptySubscription
@@ -189,6 +249,8 @@ final class ConfigManager {
 
         // 尝试 Base64 解码
         if let decodedContent = try? base64Decode(content) {
+            // 解码后仍可能超过限制，做一次校验
+            try Self.validateSubscriptionSize(bytes: decodedContent.utf8.count)
             logger.info("Subscription content was base64 encoded, decoded length: \(decodedContent.count)")
             content = decodedContent
         }
@@ -306,42 +368,118 @@ final class ConfigManager {
     // MARK: - 配置解析
 
     /// 解析 config.yaml 中 proxy-groups 的顺序
+    ///
+    /// 支持两种 YAML 格式：
+    /// - inline: `- { name: BoostNet, type: select, proxies: [...] }`
+    /// - block:  `- name: BoostNet\n    type: select\n    proxies: [...]`
     func parseProxyGroupsOrder() -> [String] {
         guard let content = try? String(contentsOf: runtimeConfigFile, encoding: .utf8) else {
             return []
         }
+        return Self.parseProxyGroupsOrder(in: content)
+    }
 
+    /// 纯函数版本：直接从 YAML 文本中解析 proxy-groups 顺序（便于测试）
+    static func parseProxyGroupsOrder(in yamlContent: String) -> [String] {
         var groups: [String] = []
         var inProxyGroups = false
 
-        for line in content.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let lines = yamlContent.components(separatedBy: .newlines)
 
-            if trimmed == "proxy-groups:" {
-                inProxyGroups = true
+        for rawLine in lines {
+            // 剥离行内注释（简单的 "#..." 切分足够覆盖常规场景）
+            let line: String
+            if let hashIdx = rawLine.firstIndex(of: "#") {
+                line = String(rawLine[..<hashIdx])
+            } else {
+                line = rawLine
+            }
+
+            let indent = line.prefix(while: { $0 == " " || $0 == "\t" }).count
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+
+            if !inProxyGroups {
+                if trimmed == "proxy-groups:" {
+                    inProxyGroups = true
+                }
                 continue
             }
 
-            guard inProxyGroups else { continue }
-
-            // 遇到下一个顶级 key 则结束
-            if !trimmed.isEmpty && !trimmed.hasPrefix("-") && !trimmed.hasPrefix(" ") && !trimmed.hasPrefix("\t") {
+            // 已进入 proxy-groups 段，遇到同级或更外层的 key → 结束
+            if !trimmed.hasPrefix("-") && indent == 0 {
                 break
             }
 
-            // 提取 inline 格式: - { name: xxx, ... }
-            if trimmed.hasPrefix("- {") {
-                if let nameRange = trimmed.range(of: "name:"),
-                   let commaOrEnd = trimmed[nameRange.upperBound...].firstIndex(of: ",") {
-                    let name = String(trimmed[nameRange.upperBound..<commaOrEnd])
-                        .trimmingCharacters(in: .whitespaces)
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
-                    if !name.isEmpty { groups.append(name) }
-                }
+            // 只关心列表项起点 "- ..."
+            guard trimmed.hasPrefix("-") else { continue }
+
+            // 提取 name（同时支持 inline 和 block 形式）
+            if let name = extractGroupName(from: trimmed),
+               !groups.contains(name) {
+                groups.append(name)
             }
         }
 
         return groups
+    }
+
+    /// 从一个列表项行中提取 group 的 name 字段（纯函数，便于测试）
+    /// - inline: `- { name: BoostNet, ... }` → "BoostNet"
+    /// - block:  `- name: BoostNet`         → "BoostNet"
+    static func extractGroupName(from trimmedLine: String) -> String? {
+        // 去掉开头的 "- "
+        let body: String
+        if trimmedLine.hasPrefix("- ") {
+            body = String(trimmedLine.dropFirst(2))
+        } else if trimmedLine == "-" {
+            body = ""
+        } else {
+            // "-{..." 或 "-xxx" 之类，紧贴的也当作 inline
+            body = String(trimmedLine.dropFirst())
+        }
+
+        // inline 格式: { name: xxx, ... }
+        if body.hasPrefix("{") {
+            return extractInlineName(from: body)
+        }
+
+        // block 格式: name: xxx
+        if body.hasPrefix("name:") {
+            let value = body.dropFirst("name:".count)
+                .trimmingCharacters(in: .whitespaces)
+            return unquote(value)
+        }
+
+        return nil
+    }
+
+    /// 从 `{ name: BoostNet, type: ..., proxies: [...] }` 中提取 name（纯函数）
+    static func extractInlineName(from inlineBody: String) -> String? {
+        guard let nameRange = inlineBody.range(of: "name:") else { return nil }
+        let after = inlineBody[nameRange.upperBound...]
+        // 找到下一个逗号或右花括号作为结束
+        var endIndex = after.endIndex
+        for idx in after.indices {
+            let ch = after[idx]
+            if ch == "," || ch == "}" {
+                endIndex = idx
+                break
+            }
+        }
+        let raw = String(after[..<endIndex]).trimmingCharacters(in: .whitespaces)
+        let unquoted = unquote(raw)
+        return unquoted.isEmpty ? nil : unquoted
+    }
+
+    /// 去除首尾的单/双引号（纯函数）
+    private static func unquote(_ value: String) -> String {
+        var v = value
+        if (v.hasPrefix("\"") && v.hasSuffix("\"") && v.count >= 2)
+            || (v.hasPrefix("'") && v.hasSuffix("'") && v.count >= 2) {
+            v = String(v.dropFirst().dropLast())
+        }
+        return v
     }
 }
 
@@ -352,6 +490,7 @@ enum ConfigError: LocalizedError {
     case invalidResponse(statusCode: Int? = nil)
     case emptySubscription
     case subscriptionBlocked
+    case subscriptionTooLarge(declaredBytes: Int)
     case networkError(Error)
 
     var errorDescription: String? {
@@ -367,6 +506,9 @@ enum ConfigError: LocalizedError {
             return "订阅内容为空"
         case .subscriptionBlocked:
             return "订阅请求被服务端拦截"
+        case .subscriptionTooLarge(let bytes):
+            let mb = Double(bytes) / 1_048_576
+            return String(format: "订阅内容过大（%.1f MB），已超过 5 MB 安全上限", mb)
         case .networkError(let error):
             return "网络错误: \(error.localizedDescription)"
         }

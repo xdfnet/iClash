@@ -37,6 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DaemonLogger.shared.log("APP", "应用启动，版本: \(version)")
         DaemonLogger.shared.log("APP", "Bundle: \(Bundle.main.bundleURL.path)")
 
+        ProxyManager.shared.delegate = self
+
         setupStatusBar()
         setupMenu()
 
@@ -197,5 +199,13 @@ extension AppDelegate: MenuControllerDelegate {
     func quitApp() {
         coordinator.prepareForQuit()
         NSApplication.shared.terminate(nil)
+    }
+}
+
+// MARK: - ProxyManagerDelegate
+
+extension AppDelegate: ProxyManagerDelegate {
+    func proxyManagerDidRefresh(_ manager: ProxyManager) {
+        syncUI()
     }
 }

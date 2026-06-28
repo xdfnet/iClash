@@ -24,7 +24,7 @@ final class MihomoServiceTests: XCTestCase {
         try createExecutable(at: bundleMihomo)
         try createExecutable(at: configMihomo)
 
-        let selectedPath = try service.resolveMihomoPath(bundleMihomo: bundleMihomo, configMihomo: configMihomo)
+        let selectedPath = try MihomoService.resolveMihomoPath(bundleMihomo: bundleMihomo, configMihomo: configMihomo)
 
         XCTAssertEqual(selectedPath, configMihomo)
     }
@@ -36,7 +36,7 @@ final class MihomoServiceTests: XCTestCase {
             .appendingPathComponent("config-mihomo")
         try createExecutable(at: bundleMihomo)
 
-        let selectedPath = try service.resolveMihomoPath(bundleMihomo: bundleMihomo, configMihomo: configMihomo)
+        let selectedPath = try MihomoService.resolveMihomoPath(bundleMihomo: bundleMihomo, configMihomo: configMihomo)
 
         XCTAssertEqual(selectedPath, configMihomo)
         XCTAssertTrue(FileManager.default.fileExists(atPath: configMihomo.path))
@@ -49,7 +49,7 @@ final class MihomoServiceTests: XCTestCase {
         try createExecutable(at: bundleMihomo)
         try FileManager.default.createDirectory(at: configMihomo, withIntermediateDirectories: true)
 
-        let selectedPath = try service.resolveMihomoPath(bundleMihomo: bundleMihomo, configMihomo: configMihomo)
+        let selectedPath = try MihomoService.resolveMihomoPath(bundleMihomo: bundleMihomo, configMihomo: configMihomo)
 
         XCTAssertEqual(selectedPath, configMihomo)
         XCTAssertEqual(try String(contentsOf: configMihomo), try String(contentsOf: bundleMihomo))

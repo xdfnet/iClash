@@ -2,6 +2,18 @@
 
 > iClash — 基于 Mihomo 内核的 macOS 菜单栏代理客户端。Swift 开发，支持多种代理协议和订阅格式。
 
+## 1.6.5 — 2026-06-28
+
+- **Refactor**: Split `MihomoService` (527 lines) into three focused components: `MihomoService` (lifecycle), `MihomoAPIClient` (HTTP API), `NetworkServiceManager` (networksetup)
+- **Fix**: YAML parser now supports block format (`- name: xxx\n    type: select`) in addition to inline format — fixes empty menu for standard-format subscriptions
+- **Refactor**: `isStoppingNormally` flag replaced with `Process.TerminationReason` — eliminates race condition between crash and normal stop detection
+- **Feature**: DaemonLogger now mirrors to OSLog (viewable in Console.app) and auto-rotates at 1 MB, keeping one archive
+- **Feature**: Subscription download enforced with 5 MB cap — rejects oversized subscriptions before OOM risk
+- **Feature**: `mihomo` and `Country.mmdb` bootstrapped from Bundle to `~/.config/iclash/` on init — always run from config dir, auto-repair if corrupted
+- **Feature**: `ProxyManagerDelegate` callback on background refresh completion — menu auto-rebuilds when proxy list updates
+- **Feature**: `resolveMihomoPath` now prefers user-installed kernel in config dir, bootstraps from Bundle if missing
+- **Tests**: Add 16 new unit tests (19 total, all passing); fix 4 pre-existing broken tests
+
 ## 1.6.4 — 2026-06-28
 
 - **Fix**: Kernel crash loop — terminationHandler from old process corrupts new process state, causing infinite crash-restart cycle
