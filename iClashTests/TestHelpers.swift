@@ -31,7 +31,6 @@ final class FakeConfigManager: ConfigManagerProtocol {
     var configDirectory: URL { URL(fileURLWithPath: "/tmp/.config/iclash") }
     var runtimeConfigFile: URL { configDirectory.appendingPathComponent("config.yaml") }
     var runtimeConfigFileExists: Bool { true }
-    func ensureBaseConfigurationExists() throws {}
     func prepareRuntimeConfigFile() async throws -> URL { runtimeConfigFile }
     func downloadAndValidateConfig(url: String, retryCount: Int) async throws -> URL { runtimeConfigFile }
     func parseProxyGroupsOrder() -> [(name: String, proxies: [String])] { [] }
@@ -50,7 +49,6 @@ final class FakeProxyManager: ProxyManagerProtocol {
 final class FakeAppSettings: AppSettingsProtocol {
     var subscriptionURL: String = ""
     var hasSubscriptionURL: Bool { !subscriptionURL.isEmpty }
-    var lastUpdateTime: Date?
 }
 
 enum FakeError: Error, Equatable {

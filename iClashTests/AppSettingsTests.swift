@@ -7,11 +7,11 @@ final class AppSettingsTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        settings.resetToDefaults()
+        settings.subscriptionURL = ""
     }
 
     override func tearDown() {
-        settings.resetToDefaults()
+        settings.subscriptionURL = ""
         super.tearDown()
     }
 
@@ -40,32 +40,4 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(settings.hasSubscriptionURL)
     }
 
-    func testLastUpdateTime_persists() {
-        let testDate = Date(timeIntervalSince1970: 1704067200)
-        settings.lastUpdateTime = testDate
-        XCTAssertEqual(settings.lastUpdateTime, testDate)
-    }
-
-    func testLastUpdateTime_setAndGet() {
-        let testDate = Date()
-        settings.lastUpdateTime = testDate
-        XCTAssertNotNil(settings.lastUpdateTime)
-        XCTAssertEqual(settings.lastUpdateTime, testDate)
-    }
-
-    func testLastUpdateTime_canBeNil() {
-        settings.lastUpdateTime = nil
-        XCTAssertNil(settings.lastUpdateTime)
-    }
-
-    func testResetToDefaults_clearsAll() {
-        settings.subscriptionURL = "https://example.com/subscription"
-        settings.lastUpdateTime = Date()
-
-        settings.resetToDefaults()
-
-        XCTAssertEqual(settings.subscriptionURL, "")
-        XCTAssertNil(settings.lastUpdateTime)
-        XCTAssertFalse(settings.hasSubscriptionURL)
-    }
 }

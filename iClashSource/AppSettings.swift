@@ -9,7 +9,6 @@ final class AppSettings {
 
     private enum Keys {
         static let subscriptionURL = "subscriptionURL"
-        static let lastUpdateTime = "lastUpdateTime"
     }
 
     /// 当前订阅地址
@@ -32,21 +31,5 @@ final class AppSettings {
         !subscriptionURL.isEmpty
     }
 
-    /// 上次更新时间
-    var lastUpdateTime: Date? {
-        get {
-            defaults.object(forKey: Keys.lastUpdateTime) as? Date
-        }
-        set {
-            defaults.set(newValue, forKey: Keys.lastUpdateTime)
-        }
-    }
-
     private init() {}
-
-    /// 重置为默认设置
-    func resetToDefaults() {
-        subscriptionURL = ""
-        lastUpdateTime = nil
-    }
 }

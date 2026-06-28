@@ -1,5 +1,3 @@
-import Foundation
-
 /// 默认规则配置
 struct DefaultRules {
 

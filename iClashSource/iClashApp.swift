@@ -1,6 +1,5 @@
 import Cocoa
 import SwiftUI
-import os.log
 
 @main
 struct iClashApp: App {
@@ -134,8 +133,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SubscriptionSettingsWindow.shared.present()
     }
 
-    @objc private func handleMihomoCrashed() {
-        showError("Mihomo 内核意外崩溃，系统代理已自动关闭")
+    @objc private func handleMihomoCrashed(_ notification: Notification) {
+        let wasProxyEnabled = (notification.userInfo?["wasProxyEnabled"] as? Bool) ?? false
+
+        Task {
+            do {
+                try await mihomoService.start()
+                if wasProxyEnabled {
+                    try mihomoService.setSystemProxy(enabled: true)
+                }
+                async let _ = mihomoService.fetchKernelVersion()
+                async let _ = ProxyManager.shared.refreshProxyList()
+                _ = await ((), ())
+                appState.syncFromServices(mihomo: mihomoService, proxy: ProxyManager.shared)
+                syncUI()
+            } catch {
+                showError("Mihomo 内核崩溃后自动重启失败: \(error.localizedDescription)")
+            }
+        }
     }
 }
 

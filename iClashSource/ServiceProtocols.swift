@@ -45,7 +45,6 @@ protocol ProxyManagerProtocol: AnyObject {
 protocol AppSettingsProtocol: AnyObject {
     var subscriptionURL: String { get set }
     var hasSubscriptionURL: Bool { get }
-    var lastUpdateTime: Date? { get set }
 }
 
 // MARK: - Kernel Service
@@ -63,7 +62,6 @@ protocol KernelServiceControlling: AnyObject {
 // MARK: - Conformances
 
 extension MihomoService: MihomoServiceProtocol {}
-extension MihomoService: KernelServiceControlling {}
 extension ConfigManager: ConfigManagerProtocol {}
 extension ProxyManager: ProxyManagerProtocol {}
 extension AppSettings: AppSettingsProtocol {}

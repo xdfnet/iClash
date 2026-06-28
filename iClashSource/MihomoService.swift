@@ -336,6 +336,8 @@ final class MihomoService: ObservableObject {
 
     private func handleProcessTermination() {
         let wasRunning = isRunning
+        // 保存代理状态（关代理前拍快照）
+        let proxyWasEnabled = isSystemProxyEnabled()
         process = nil
         apiUrl = nil
 
@@ -343,7 +345,11 @@ final class MihomoService: ObservableObject {
             try? setSystemProxy(enabled: false)
             if !isStoppingNormally {
                 logger.error("mihomo crashed unexpectedly")
-                NotificationCenter.default.post(name: .mihomoCrashed, object: nil)
+                NotificationCenter.default.post(
+                    name: .mihomoCrashed,
+                    object: nil,
+                    userInfo: ["wasProxyEnabled": proxyWasEnabled]
+                )
             }
         }
         isStoppingNormally = false

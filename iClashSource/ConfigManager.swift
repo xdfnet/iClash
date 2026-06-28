@@ -455,12 +455,6 @@ final class ConfigManager {
         return (host, port)
     }
 
-    /// 提取代理名称
-    private func extractProxyName(from url: URL) -> String {
-        let decodedFragment = decodeURIComponent(url.fragment ?? "")
-        return decodedFragment.isEmpty ? "Unknown" : decodedFragment
-    }
-
     private func decodeURIComponent(_ value: String) -> String {
         value.removingPercentEncoding ?? value
     }
