@@ -102,7 +102,7 @@ xcodegen generate
 make debug
 ```
 
-依赖：Xcode 15+、XcodeGen
+依赖：Xcode 15+
 
 ## 开发命令
 
@@ -130,8 +130,6 @@ iClash/
 ├── Makefile                        # 常用构建与发布命令
 ├── scripts/
 │   └── update-resources.sh         # 一键更新 mihomo + Country.mmdb
-├── project.yml                     # XcodeGen 配置
-├── iClash.entitlements             # 沙盒权限
 ├── iClash.xcodeproj/               # Xcode 工程
 ├── docs/
 │   ├── ARCHITECTURE.md             # 架构文档

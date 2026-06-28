@@ -15,8 +15,6 @@ final class MihomoService: ObservableObject {
     private let logger = Logger(subsystem: "com.iclash.macos", category: "MihomoService")
     private let apiPort: UInt16 = 9090
     private let mixedPort: UInt16 = 7890
-    private let statusNotification = Notification.Name("MihomoStatusChanged")
-
     /// 正常停止标记 — 用于区分崩溃与主动停止
     private var isStoppingNormally = false
 
@@ -354,7 +352,6 @@ final class MihomoService: ObservableObject {
 
     private func updateRunningState(_ isRunning: Bool) {
         self.isRunning = isRunning
-        NotificationCenter.default.post(name: statusNotification, object: nil)
     }
 }
 
