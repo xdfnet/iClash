@@ -18,6 +18,11 @@ final class MihomoService: ObservableObject {
     /// 正常停止标记 — 用于区分崩溃与主动停止
     private var isStoppingNormally = false
 
+    /// 崩溃时间戳（用于崩溃循环检测）
+    private var crashTimestamps: [Date] = []
+    private let crashThreshold = 3
+    private let crashWindow: TimeInterval = 30
+
     /// 内核版本
     private(set) var kernelVersion: String = "未知"
 
@@ -25,9 +30,30 @@ final class MihomoService: ObservableObject {
 
     private init() {}
 
+    // MARK: - 崩溃循环检测
+
+    func recordCrash() {
+        crashTimestamps.append(Date())
+    }
+
+    func resetCrashCounters() {
+        crashTimestamps.removeAll()
+    }
+
+    func isInCrashLoop() -> Bool {
+        let now = Date()
+        crashTimestamps = crashTimestamps.filter { now.timeIntervalSince($0) < crashWindow }
+        return crashTimestamps.count >= crashThreshold
+    }
+
     /// 启动 Mihomo
     func start() async throws {
         guard !isRunning else { return }
+
+        // 崩溃循环检测
+        if isInCrashLoop() {
+            throw MihomoError.crashLoopDetected
+        }
 
         try cleanupStaleProcesses()
 
@@ -61,11 +87,11 @@ final class MihomoService: ObservableObject {
                 self?.logger.debug("[mihomo] \(output, privacy: .public)")
             }
         }
-        process.terminationHandler = { [weak self] process in
-            outputPipe.fileHandleForReading.readabilityHandler = nil
+        process.terminationHandler = { [weak self] terminatedProcess in
             Task { @MainActor [weak self] in
-                self?.logger.error("mihomo terminated with status: \(process.terminationStatus)")
-                self?.handleProcessTermination()
+                guard let self, self.process === terminatedProcess else { return }
+                self.logger.error("mihomo terminated with status: \(terminatedProcess.terminationStatus)")
+                self.handleProcessTermination()
             }
         }
 
@@ -90,6 +116,7 @@ final class MihomoService: ObservableObject {
             }
 
             updateRunningState(true)
+            resetCrashCounters()
             DaemonLogger.shared.log("KERNEL", "启动成功，PID: \(process.processIdentifier)")
 
         } catch let error as MihomoError {
@@ -464,6 +491,7 @@ enum MihomoError: LocalizedError {
     case failedToStart(Error, details: String? = nil)
     case apiNotAvailable
     case apiSelectFailed
+    case crashLoopDetected
 
     var errorDescription: String? {
         switch self {
@@ -492,6 +520,8 @@ enum MihomoError: LocalizedError {
             return "API 不可用"
         case .apiSelectFailed:
             return "切换代理失败"
+        case .crashLoopDetected:
+            return "Mihomo 内核反复崩溃，已停止自动重启"
         }
     }
 }

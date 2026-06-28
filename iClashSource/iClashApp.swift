@@ -33,7 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appSettings = AppSettings.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        DaemonLogger.shared.log("APP", "应用启动，版本: 1.6.2")
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
+        DaemonLogger.shared.log("APP", "应用启动，版本: \(version)")
         DaemonLogger.shared.log("APP", "Bundle: \(Bundle.main.bundleURL.path)")
 
         setupStatusBar()
@@ -138,6 +139,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleMihomoCrashed(_ notification: Notification) {
+        mihomoService.recordCrash()
+
+        guard !mihomoService.isInCrashLoop() else {
+            DaemonLogger.shared.log("KERNEL", "❌ 崩溃次数过多，已停止自动重启")
+            let alert = NSAlert()
+            alert.messageText = "Mihomo 内核反复崩溃"
+            alert.informativeText = "请检查订阅配置或重新启动应用。如果问题持续，可能需要更新 Mihomo 内核。"
+            alert.alertStyle = .critical
+            alert.runModal()
+            return
+        }
+
         Task {
             do {
                 DaemonLogger.shared.log("KERNEL", "自动重启中...")

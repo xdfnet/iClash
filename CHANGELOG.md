@@ -2,6 +2,12 @@
 
 > iClash — 基于 Mihomo 内核的 macOS 菜单栏代理客户端。Swift 开发，支持多种代理协议和订阅格式。
 
+## 1.6.4 — 2026-06-28
+
+- **Fix**: Kernel crash loop — terminationHandler from old process corrupts new process state, causing infinite crash-restart cycle
+- **Robustness**: Add crash circuit breaker — 3+ crashes in 30s triggers fatal alert instead of infinite retry
+- **Chore**: Read app version from Info.plist at startup instead of hardcoded string
+
 ## 1.6.3 — 2026-06-28
 
 - **Log**: Add daemon.log at `~/.config/iclash/daemon.log`, log all key actions for troubleshooting
