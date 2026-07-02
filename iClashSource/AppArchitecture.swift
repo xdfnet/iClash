@@ -281,14 +281,16 @@ struct DaemonLogger {
         osLog.info("\(line, privacy: .public)")
     }
 
-    /// 读取全部日志（主文件 + 归档文件）
+    /// 读取全部日志（主文件 + 归档文件），通过串行 queue 保护避免读到半截数据
     func readAll() -> String {
-        let archived = (try? String(contentsOf: archiveFile, encoding: .utf8)) ?? ""
-        let current = (try? String(contentsOf: logFile, encoding: .utf8)) ?? ""
-        return archived + current
+        fileHandleQueue.sync {
+            let archived = (try? String(contentsOf: archiveFile, encoding: .utf8)) ?? ""
+            let current = (try? String(contentsOf: logFile, encoding: .utf8)) ?? ""
+            return archived + current
+        }
     }
 
-    /// 清空日志
+    /// 清空日志（通过串行 queue 保护）
     func clear() {
         fileHandleQueue.sync {
             try? "".data(using: .utf8)?.write(to: logFile)

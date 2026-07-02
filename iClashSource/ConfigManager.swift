@@ -64,9 +64,12 @@ final class ConfigManager {
         try? ensureKernelExists()
     }
 
-    /// 确保 mihomo 内核存在于配置目录（从 Bundle 复制，损坏时自动修复）
+    /// 确保 mihomo 内核存在于配置目录（从 Bundle 复制，损坏或 Bundle 更新时覆盖）
     ///
-    /// 与 Country.mmdb 同等对待：启动时即初始化到 config 目录，后续只使用 config 版本。
+    /// 决策优先级：
+    /// 1. config 目录缺失/不可执行 → 复制（引导/修复）
+    /// 2. Bundle 文件修改时间比 config 版本新 → 覆盖（App 更新后自动同步新版内核）
+    /// 3. 以上均不满足 → 跳过
     private func ensureKernelExists() throws {
         let fm = FileManager.default
         let kernelPath = configDirectory.appendingPathComponent("mihomo")
@@ -76,8 +79,10 @@ final class ConfigManager {
 
         let needsCopy: Bool
         if fm.fileExists(atPath: kernelPath.path) {
-            // 检查是否可执行（被破坏则重新复制）
             if !fm.isExecutableFile(atPath: kernelPath.path) {
+                needsCopy = true
+                try? fm.removeItem(at: kernelPath)
+            } else if isBundleResourceNewer(bundleKernel, configCopy: kernelPath) {
                 needsCopy = true
                 try? fm.removeItem(at: kernelPath)
             } else {
@@ -93,11 +98,12 @@ final class ConfigManager {
         }
     }
 
-    /// 确保 GeoIP 数据库存在于配置目录（从 Bundle 复制，不依赖符号链接）
+    /// 确保 GeoIP 数据库存在于配置目录（从 Bundle 复制，损坏或 Bundle 更新时覆盖）
     ///
     /// 行为：
     /// - 配置目录中无 Country.mmdb → 从 Bundle 复制
-    /// - 配置目录中已有但文件大小异常（< 1MB，正常应 > 1MB）→ 重新复制（修复损坏）
+    /// - 配置目录中已有但文件大小异常（< 1MB）→ 重新复制（修复损坏）
+    /// - Bundle 文件修改时间比 config 版本新 → 覆盖（App 更新后自动同步新版 mmdb）
     /// - Bundle 中无 Country.mmdb → 跳过（降级，不影响主流程）
     private func ensureGeoIPExists() throws {
         let geoipPath = configDirectory.appendingPathComponent("Country.mmdb")
@@ -109,12 +115,16 @@ final class ConfigManager {
 
         let needsCopy: Bool
         if fileManager.fileExists(atPath: geoipPath.path) {
-            // 文件存在时，检查大小是否正常（GeoIP 通常 > 1MB）
             let attrs = try? fileManager.attributesOfItem(atPath: geoipPath.path)
             let size = attrs?[.size] as? UInt64 ?? 0
-            needsCopy = size < 1_048_576
-            if needsCopy {
+            if size < 1_048_576 {
+                needsCopy = true
                 try? fileManager.removeItem(at: geoipPath)
+            } else if isBundleResourceNewer(bundleGeoIP, configCopy: geoipPath) {
+                needsCopy = true
+                try? fileManager.removeItem(at: geoipPath)
+            } else {
+                needsCopy = false
             }
         } else {
             needsCopy = true
@@ -123,6 +133,17 @@ final class ConfigManager {
         if needsCopy {
             try fileManager.copyItem(at: bundleGeoIP, to: geoipPath)
         }
+    }
+
+    /// 判断 Bundle 中的资源文件是否比 config 目录中的副本更新
+    /// - Returns: true 当 Bundle 文件的修改时间 > config 副本的修改时间
+    private func isBundleResourceNewer(_ bundleFile: URL, configCopy: URL) -> Bool {
+        let fm = FileManager.default
+        guard let bundleDate = try? fm.attributesOfItem(atPath: bundleFile.path)[.modificationDate] as? Date,
+              let configDate = try? fm.attributesOfItem(atPath: configCopy.path)[.modificationDate] as? Date else {
+            return false
+        }
+        return bundleDate > configDate
     }
 
     /// 获取运行时配置文件路径（文件已存在时跳过下载）
@@ -206,7 +227,7 @@ final class ConfigManager {
             cachePolicy: .reloadIgnoringLocalCacheData,
             timeoutInterval: 30
         )
-        request.setValue("Mihomo/1.18.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("Mihomo/1.19.27", forHTTPHeaderField: "User-Agent")
 
         let (data, response): (Data, URLResponse)
         do {
