@@ -51,8 +51,9 @@ update_mihomo() {
     gh release download "$latest" --repo MetaCubeX/mihomo -p "$filename" -O "/tmp/${filename}"
 
     # 解压替换
+    chmod u+w "$MIHOMO_PATH" 2>/dev/null || true
     gunzip -c "/tmp/${filename}" > "$MIHOMO_PATH"
-    chmod +x "$MIHOMO_PATH"
+    chmod 555 "$MIHOMO_PATH"
     rm "/tmp/${filename}"
 
     # 验证

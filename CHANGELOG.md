@@ -2,6 +2,18 @@
 
 > iClash — 基于 Mihomo 内核的 macOS 菜单栏代理客户端。Swift 开发，支持多种代理协议和订阅格式。
 
+## 1.6.7 — 2026-08-03
+
+- **Feature**: Upgrade Mihomo kernel to v1.19.29
+- **Feature**: Auto-sync Kernel/GeoIP from Bundle to config dir when Bundle resource is newer (mod-time comparison) — app updates propagate new kernel/GeoIP automatically
+- **Update**: User-Agent Mihomo/1.18.1 → 1.19.27; Country.mmdb refreshed (Loyalsoldier/geoip 20260702)
+- **Fix**: DaemonLogger `readAll()` now protected by serial queue — no half-read data under concurrency
+- **Chore**: `update-resources.sh` — `chmod +w` before overwrite, kernel replaced with `555` permission
+
+## 1.6.6 — 2026-06-28
+
+- **Feature**: Settings window redesigned in iRelay style — title + Cancel/Save buttons + keyboard shortcuts + monospace font + 560px width for long subscription links
+
 ## 1.6.5 — 2026-06-28
 
 - **Refactor**: Split `MihomoService` (527 lines) into three focused components: `MihomoService` (lifecycle), `MihomoAPIClient` (HTTP API), `NetworkServiceManager` (networksetup)
