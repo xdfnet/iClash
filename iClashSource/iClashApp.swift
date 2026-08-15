@@ -200,8 +200,10 @@ extension AppDelegate: MenuControllerDelegate {
     }
 
     func toggleProxy() {
-        coordinator.toggleProxy()
-        syncUI()
+        Task {
+            await coordinator.toggleProxy()
+            self.syncUI()
+        }
     }
 
     func openSettings() {

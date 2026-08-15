@@ -183,7 +183,7 @@ final class AppCoordinator {
 
     // MARK: - 代理控制
 
-    func toggleProxy() {
+    func toggleProxy() async {
         guard settings.hasSubscriptionURL else {
             appState.lastError = "请先配置订阅地址"
             return
@@ -193,6 +193,21 @@ final class AppCoordinator {
         if appState.isProxyEnabled {
             safelySetProxy(enabled: false)
         } else {
+            // 开启系统代理前确保内核在运行：内核未运行先自动拉起，失败则回滚（不开启代理）
+            if !mihomo.isRunning {
+                do {
+                    DaemonLogger.shared.log("KERNEL", "内核未运行，自动启动中...")
+                    try await mihomo.start()
+                    async let fetchVersion: Void = mihomo.fetchKernelVersion()
+                    async let refreshProxies: Void = proxy.refreshProxyList()
+                    _ = await (fetchVersion, refreshProxies)
+                    appState.syncFromServices(mihomo: mihomo, proxy: proxy)
+                } catch {
+                    appState.lastError = "启动代理失败: \(error.localizedDescription)"
+                    DaemonLogger.shared.log("PROXY", "❌ 内核启动失败，已取消开启系统代理: \(error.localizedDescription)")
+                    return
+                }
+            }
             safelySetProxy(enabled: true)
         }
         appState.isProxyEnabled = mihomo.isSystemProxyEnabled()
@@ -223,7 +238,13 @@ final class AppCoordinator {
 
     func prepareForQuit() {
         DaemonLogger.shared.log("APP", "退出应用")
+        // 退出前清除本应用开启的系统代理，避免内核停止后系统流量指向死端口导致断网
+        if mihomo.isSystemProxyEnabled() {
+            safelySetProxy(enabled: false)
+            DaemonLogger.shared.log("PROXY", "已关闭系统代理")
+        }
         if mihomo.isRunning {
+            DaemonLogger.shared.log("KERNEL", "停止内核")
             mihomo.stop()
         }
         proxy.reset()

@@ -7,12 +7,15 @@ import Foundation
 final class FakeKernelService: MihomoServiceProtocol {
     var isRunning: Bool
     var kernelVersion: String = "v1.19.0"
-    private let proxyEnabled: Bool
+    private(set) var proxyEnabled: Bool
 
     private(set) var stopCallCount = 0
     private(set) var startCallCount = 0
     private(set) var proxyEnableRequests: [Bool] = []
     private(set) var fetchVersionCallCount = 0
+
+    /// 注入 start() 抛出的错误（模拟内核启动失败）
+    var startError: Error?
 
     init(isRunning: Bool, proxyEnabled: Bool) {
         self.isRunning = isRunning
@@ -21,8 +24,15 @@ final class FakeKernelService: MihomoServiceProtocol {
 
     func isSystemProxyEnabled() -> Bool { proxyEnabled }
     func stop() { stopCallCount += 1; isRunning = false }
-    func start() async throws { startCallCount += 1; isRunning = true }
-    func setSystemProxy(enabled: Bool) throws { proxyEnableRequests.append(enabled) }
+    func start() async throws {
+        startCallCount += 1
+        if let startError { throw startError }
+        isRunning = true
+    }
+    func setSystemProxy(enabled: Bool) throws {
+        proxyEnableRequests.append(enabled)
+        proxyEnabled = enabled
+    }
     func fetchKernelVersion() async { fetchVersionCallCount += 1 }
     func fetchProxies() async throws -> [String: ProxyInfo] { [:] }
     func selectProxy(name: String, in group: String) async throws {}
